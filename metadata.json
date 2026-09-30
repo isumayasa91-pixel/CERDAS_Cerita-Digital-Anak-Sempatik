@@ -1,0 +1,6 @@
+{
+  "name": "CERDAS - Cerita Digital Anak Sempatik",
+  "description": "Aplikasi cerita digital anak-anak berbasis alur 4F (Fact, Feeling, Finding, Future) dengan perekam suara dan visualisasi emosi untuk mendukung kesehatan mental anak, terhubung dengan Guru Wali Kelas dan Guru BK.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
