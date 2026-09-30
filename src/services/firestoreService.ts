@@ -361,6 +361,16 @@ export async function deleteTeacherFromFirestore(teacherId: string) {
   }
 }
 
+// Delete Story
+export async function deleteStoryFromFirestore(storyId: string) {
+  try {
+    await deleteDoc(doc(db, 'stories', storyId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `stories/${storyId}`);
+    throw error;
+  }
+}
+
 // Update Teacher
 export async function updateTeacherInFirestore(teacherId: string, updates: Partial<Teacher>) {
   try {

@@ -47,6 +47,7 @@ import {
   saveStoryToFirestore,
   addStudentToFirestore,
   deleteStudentFromFirestore,
+  deleteStoryFromFirestore,
   updateStudentInFirestore,
   registerTeacherToFirestore,
   deleteTeacherFromFirestore,
@@ -718,6 +719,24 @@ export default function App() {
     } catch (err) {
       console.error(err);
       alert("Gagal mereset akun siswa.");
+    }
+  };
+
+  // Delete individual story (for Guru Wali / BK / Admin)
+  const handleDeleteStory = async (storyId: string, studentName: string) => {
+    if (!window.confirm(`Apakah Anda yakin ingin MENGHAPUS cerita / jurnal refleksi milik "${studentName}" ini? Action ini tidak dapat dibatalkan.`)) {
+      return;
+    }
+
+    try {
+      await deleteStoryFromFirestore(storyId);
+      if (activeStoryDetail?.id === storyId) {
+        setActiveStoryDetail(null);
+      }
+      playTone(220, 'triangle', 0.2);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal menghapus cerita dari database.");
     }
   };
 
@@ -2551,6 +2570,15 @@ export default function App() {
 
                             <button
                               type="button"
+                              onClick={() => handleDeleteStory(story.id, story.studentName)}
+                              className="w-full px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold text-xs rounded-xl border border-rose-200 shadow-sm flex items-center justify-center gap-1.5 transition-colors"
+                              title="Hapus cerita siswa yang salah/keliru ini"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Hapus Cerita Ini
+                            </button>
+
+                            <button
+                              type="button"
                               onClick={() => {
                                 handlePrintReport(
                                   'single_story',
@@ -2866,6 +2894,14 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteStory(activeStoryDetail.id, activeStoryDetail.studentName)}
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold text-xs rounded-xl border border-rose-200 shadow-sm flex items-center gap-1.5 transition-all"
+                        title="Hapus cerita/rujukan ini"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Hapus Cerita
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
