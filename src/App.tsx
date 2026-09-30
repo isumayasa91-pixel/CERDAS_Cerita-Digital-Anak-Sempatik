@@ -24,7 +24,16 @@ import {
   Home,
   UserCheck,
   Award,
-  Trash2
+  Trash2,
+  Shield,
+  Settings,
+  Users,
+  Key,
+  Check,
+  Lock,
+  LogOut,
+  RefreshCw,
+  UserPlus
 } from 'lucide-react';
 import {
   seedInitialFirestoreData,
@@ -35,6 +44,7 @@ import {
   addStudentToFirestore,
   deleteStudentFromFirestore,
   registerTeacherToFirestore,
+  deleteTeacherFromFirestore,
   updateGuruNoteInFirestore,
   escalateStoryInFirestore,
   updateCounselorNoteInFirestore,
@@ -207,7 +217,7 @@ const CHARACTERS = [
 ];
 
 export default function App() {
-  const [role, setRole] = useState<'murid' | 'guru_wali' | 'guru_bk'>('murid');
+  const [role, setRole] = useState<'murid' | 'guru_wali' | 'guru_bk' | 'admin'>('murid');
   const [students, setStudents] = useState<any[]>([]);
   const [stories, setStories] = useState<any[]>([]);
   const [teachers, setTeachers] = useState<any[]>([]);
@@ -276,6 +286,29 @@ export default function App() {
   const [bkPasswordInput, setBkPasswordInput] = useState('');
   const [parentChildInput, setParentChildInput] = useState('');
   const [bkAuthError, setBkAuthError] = useState('');
+
+  // Admin Portal States
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
+    return localStorage.getItem('isAdminLoggedIn') === 'true';
+  });
+  const [adminEmail, setAdminEmail] = useState('isumayasa91@guru.smp.belajar.id');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminAuthError, setAdminAuthError] = useState('');
+  const [adminTab, setAdminTab] = useState<'teachers' | 'students' | 'stats'>('teachers');
+
+  // Admin New Teacher Form
+  const [adminNewTeacherName, setAdminNewTeacherName] = useState('');
+  const [adminNewTeacherEmail, setAdminNewTeacherEmail] = useState('');
+  const [adminNewTeacherPassword, setAdminNewTeacherPassword] = useState('password123');
+  const [adminNewTeacherClass, setAdminNewTeacherClass] = useState('Kelas VII A');
+  const [adminTeacherSuccessMsg, setAdminTeacherSuccessMsg] = useState('');
+
+  // Admin New Student Form
+  const [adminNewStudentName, setAdminNewStudentName] = useState('');
+  const [adminNewStudentClass, setAdminNewStudentClass] = useState('Kelas VII A');
+  const [adminNewStudentAvatar, setAdminNewStudentAvatar] = useState('👦');
+  const [adminNewStudentGuruWali, setAdminNewStudentGuruWali] = useState('Ibu Rahma, S.Pd');
+  const [adminStudentSuccessMsg, setAdminStudentSuccessMsg] = useState('');
 
   // Initialize Real-time Firestore Subscriptions and Seeding
   useEffect(() => {
@@ -735,6 +768,108 @@ export default function App() {
     playTone(220, 'sine', 0.1);
   };
 
+  // Handle Admin Login
+  const handleAdminLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminAuthError('');
+    const cleanEmail = adminEmail.trim().toLowerCase();
+    const cleanPass = adminPassword.trim();
+
+    if (
+      cleanPass === 'admin123' || 
+      cleanPass === 'admin' || 
+      cleanPass === '123456' || 
+      cleanPass === 'cerdas123' ||
+      (cleanEmail === 'isumayasa91@guru.smp.belajar.id' && (cleanPass === 'admin123' || cleanPass === 'password123'))
+    ) {
+      setIsAdminLoggedIn(true);
+      localStorage.setItem('isAdminLoggedIn', 'true');
+      setAdminPassword('');
+      playTone(523.25, 'sine', 0.15);
+    } else {
+      setAdminAuthError('Kata sandi administrator salah. Gunakan "admin123" atau PIN 123456.');
+    }
+  };
+
+  // Handle Admin Logout
+  const handleAdminLogout = () => {
+    setIsAdminLoggedIn(false);
+    localStorage.removeItem('isAdminLoggedIn');
+    playTone(220, 'sine', 0.1);
+  };
+
+  // Admin registers new teacher
+  const handleAdminAddTeacher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminNewTeacherName.trim() || !adminNewTeacherEmail.trim() || !adminNewTeacherPassword.trim()) {
+      alert("Nama, email, dan kata sandi wajib diisi!");
+      return;
+    }
+
+    try {
+      const existing = teachers.find(t => t.email?.toLowerCase() === adminNewTeacherEmail.trim().toLowerCase());
+      if (existing) {
+        alert("Email guru ini sudah terdaftar sebelumnya.");
+        return;
+      }
+
+      await registerTeacherToFirestore({
+        name: adminNewTeacherName.trim(),
+        email: adminNewTeacherEmail.trim(),
+        password: adminNewTeacherPassword.trim(),
+        class: adminNewTeacherClass.trim()
+      });
+
+      setAdminNewTeacherName('');
+      setAdminNewTeacherEmail('');
+      setAdminNewTeacherPassword('password123');
+      setAdminTeacherSuccessMsg(`✅ Akun Guru "${adminNewTeacherName}" berhasil didaftarkan ke Cloud Firestore!`);
+      setTimeout(() => setAdminTeacherSuccessMsg(''), 5000);
+      playTone(523.25, 'sine', 0.15);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal mendaftarkan akun guru.");
+    }
+  };
+
+  // Admin deletes teacher
+  const handleAdminDeleteTeacher = async (teacherId: string, teacherName: string) => {
+    if (!window.confirm(`Hapus akun guru "${teacherName}" dari Cloud Firestore?`)) return;
+    try {
+      await deleteTeacherFromFirestore(teacherId);
+      playTone(220, 'triangle', 0.2);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal menghapus akun guru.");
+    }
+  };
+
+  // Admin registers new student
+  const handleAdminAddStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminNewStudentName.trim()) {
+      alert("Nama siswa wajib diisi!");
+      return;
+    }
+
+    try {
+      await addStudentToFirestore({
+        name: adminNewStudentName.trim(),
+        class: adminNewStudentClass,
+        avatar: adminNewStudentAvatar,
+        guruWali: adminNewStudentGuruWali
+      });
+
+      setAdminNewStudentName('');
+      setAdminStudentSuccessMsg(`✅ Akun Siswa "${adminNewStudentName}" berhasil didaftarkan ke Cloud Firestore!`);
+      setTimeout(() => setAdminStudentSuccessMsg(''), 5000);
+      playTone(523.25, 'sine', 0.15);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal mendaftarkan siswa.");
+    }
+  };
+
   // Filtered lists for the active teacher (Guru Wali)
   const teacherStudents = students.filter(st => activeGuruWaliFilter === 'Semua' || st.guruWali === activeGuruWaliFilter);
   const teacherStories = stories.filter(story => {
@@ -816,7 +951,7 @@ export default function App() {
         </div>
 
         {/* Zone 2: Segmented Controls - Mode Role Selection */}
-        <nav className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl max-w-md w-auto">
+        <nav className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl max-w-lg w-auto overflow-x-auto">
           <button 
             onClick={() => { setRole('murid'); playTone(300, 'sine', 0.1); }}
             className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'murid' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
@@ -835,6 +970,12 @@ export default function App() {
           >
             🩺 <span className="hidden sm:inline">Ruang</span> BK & Ortu
           </button>
+          <button 
+            onClick={() => { setRole('admin'); playTone(450, 'sine', 0.1); }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'admin' ? 'bg-rose-600 text-white shadow-sm' : 'text-rose-700 bg-rose-50 hover:bg-rose-100'}`}
+          >
+            <Shield className="w-3.5 h-3.5" /> <span className="font-bold">Admin</span>
+          </button>
         </nav>
 
         {/* Zone 3: Active Profile Indicator */}
@@ -844,11 +985,18 @@ export default function App() {
               <span className="text-lg">{selectedStudent.avatar}</span>
               <span className="text-xs font-bold text-sky-700 truncate max-w-[100px]">{selectedStudent.name.split(' ')[0]}</span>
             </div>
+          ) : role === 'admin' ? (
+            <div className="flex items-center gap-1.5 bg-rose-50 px-3 py-1 rounded-full border border-rose-200">
+              <Shield className="w-3.5 h-3.5 text-rose-600" />
+              <span className="text-xs font-bold text-rose-700">
+                {isAdminLoggedIn ? 'Admin Aktif' : 'Portal Admin'}
+              </span>
+            </div>
           ) : (
             <div className="flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
               <User className="w-4 h-4 text-slate-500" />
               <span className="text-xs font-bold text-slate-700">
-                {role === 'guru_wali' ? 'Guru Wali Kelas' : 'Guru BK'}
+                {role === 'guru_wali' ? (currentTeacher ? currentTeacher.name.split(' ')[0] : 'Guru Wali') : 'Guru BK'}
               </span>
             </div>
           )}
@@ -1638,18 +1786,31 @@ export default function App() {
               </button>
             </form>
 
-            <div className="text-center text-xs text-slate-500 border-t border-slate-100 pt-4 flex items-center justify-center gap-1.5">
-              <span>{authMode === 'login' ? 'Belum punya akun?' : 'Sudah punya akun?'}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode(authMode === 'login' ? 'register' : 'login');
-                  setAuthError('');
-                }}
-                className="text-sky-600 font-extrabold hover:underline"
-              >
-                {authMode === 'login' ? 'Daftar di Sini' : 'Masuk di Sini'}
-              </button>
+            <div className="text-center text-xs text-slate-500 border-t border-slate-100 pt-4 flex flex-col gap-2.5">
+              <div className="flex items-center justify-center gap-1.5">
+                <span>{authMode === 'login' ? 'Belum punya akun?' : 'Sudah punya akun?'}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode(authMode === 'login' ? 'register' : 'login');
+                    setAuthError('');
+                  }}
+                  className="text-sky-600 font-extrabold hover:underline"
+                >
+                  {authMode === 'login' ? 'Daftar di Sini' : 'Masuk di Sini'}
+                </button>
+              </div>
+              <div className="bg-rose-50 border border-rose-100 p-2 rounded-xl text-[11px] text-rose-800 flex items-center justify-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                <span>Pendaftaran akun guru resmi dapat dilakukan via</span>
+                <button
+                  type="button"
+                  onClick={() => { setRole('admin'); playTone(450, 'sine', 0.1); }}
+                  className="font-black text-rose-700 underline hover:text-rose-900"
+                >
+                  Menu Admin
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -2312,6 +2473,490 @@ export default function App() {
             </div>
 
           </div>
+          </div>
+        )}
+
+        {/* ==================================================================== */}
+        {/* ROLE: ADMINISTRATOR SEKOLAH (ADMIN PORTAL)                          */}
+        {/* ==================================================================== */}
+        {role === 'admin' && !isAdminLoggedIn && (
+          <div className="max-w-md w-full mx-auto my-8 bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm flex flex-col gap-6 animate-fade-in">
+            <div className="text-center flex flex-col gap-2">
+              <span className="text-5xl mx-auto p-4 bg-rose-50 rounded-full w-20 h-20 flex items-center justify-center border border-rose-100 text-rose-600">
+                <Shield className="w-10 h-10" />
+              </span>
+              <h3 className="text-xl font-extrabold text-slate-800">Portal Administrator Sekolah</h3>
+              <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                Kelola pendaftaran akun Guru Wali, Guru BK, dan data Siswa secara terpusat langsung ke Cloud Firestore.
+              </p>
+            </div>
+
+            {adminAuthError && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold p-3.5 rounded-xl">
+                ⚠️ {adminAuthError}
+              </div>
+            )}
+
+            <form onSubmit={handleAdminLogin} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-slate-600">Email Administrator:</label>
+                <input
+                  type="email"
+                  required
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  placeholder="admin@cerdas.id"
+                  className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white text-xs font-medium focus:outline-none focus:border-rose-500"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-slate-600">Kata Sandi Administrator:</label>
+                <input
+                  type="password"
+                  required
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  placeholder="Masukkan password admin (default: admin123)"
+                  className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white text-xs font-medium focus:outline-none focus:border-rose-500"
+                />
+              </div>
+
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-1">
+                <p className="font-bold text-slate-700 flex items-center gap-1">
+                  <Key className="w-3.5 h-3.5 text-rose-600" /> Kredensial Default Admin:
+                </p>
+                <p>Kata Sandi: <code className="bg-slate-200 px-1 py-0.5 rounded font-mono font-bold text-rose-700">admin123</code></p>
+              </div>
+
+              <button
+                type="submit"
+                className="mt-2 py-3 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-sm rounded-xl shadow-md transition-colors flex items-center justify-center gap-2"
+              >
+                <Lock className="w-4 h-4" /> Masuk ke Portal Admin
+              </button>
+            </form>
+          </div>
+        )}
+
+        {role === 'admin' && isAdminLoggedIn && (
+          <div className="flex flex-col gap-6 w-full animate-fade-in">
+            {/* Admin Header Banner */}
+            <div className="bg-gradient-to-r from-rose-600 to-rose-700 text-white p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="p-3 bg-white/20 backdrop-blur-sm rounded-2xl">
+                  <Shield className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-black text-lg md:text-xl">Dashboard Administrator Sekolah</h3>
+                    <span className="bg-white/20 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                      Cloud Firestore Live
+                    </span>
+                  </div>
+                  <p className="text-xs text-rose-100 mt-0.5">
+                    Kelola dan daftarkan akun resmi Guru Wali, Guru BK, dan data Siswa yang tersinkronisasi otomatis ke semua perangkat.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={handleAdminLogout}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 flex items-center gap-1.5 transition-colors self-end md:self-auto"
+              >
+                <LogOut className="w-4 h-4" /> Keluar Admin
+              </button>
+            </div>
+
+            {/* Admin Sub Navigation Tabs */}
+            <div className="flex items-center gap-2 border-b border-slate-200 pb-3 overflow-x-auto">
+              <button
+                onClick={() => { setAdminTab('teachers'); playTone(300, 'sine', 0.05); }}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all whitespace-nowrap ${adminTab === 'teachers' ? 'bg-rose-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}
+              >
+                <UserCheck className="w-4 h-4" /> Kelola & Daftarkan Guru ({teachers.length})
+              </button>
+              <button
+                onClick={() => { setAdminTab('students'); playTone(350, 'sine', 0.05); }}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all whitespace-nowrap ${adminTab === 'students' ? 'bg-rose-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}
+              >
+                <Users className="w-4 h-4" /> Kelola & Daftarkan Siswa ({students.length})
+              </button>
+              <button
+                onClick={() => { setAdminTab('stats'); playTone(400, 'sine', 0.05); }}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all whitespace-nowrap ${adminTab === 'stats' ? 'bg-rose-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}
+              >
+                <TrendingUp className="w-4 h-4" /> Rekap & Monitoring Data
+              </button>
+            </div>
+
+            {/* TAB 1: KELOLA & DAFTARKAN GURU */}
+            {adminTab === 'teachers' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Form Daftarkan Guru Baru */}
+                <div className="lg:col-span-5 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col gap-4">
+                  <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
+                    <span className="p-2 bg-rose-50 text-rose-600 rounded-xl"><UserPlus className="w-5 h-5" /></span>
+                    <div>
+                      <h4 className="font-extrabold text-sm text-slate-800">Daftarkan Akun Guru Baru</h4>
+                      <p className="text-[11px] text-slate-500">Akun akan langsung aktif di database cloud Firestore.</p>
+                    </div>
+                  </div>
+
+                  {adminTeacherSuccessMsg && (
+                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold p-3 rounded-xl animate-fade-in">
+                      {adminTeacherSuccessMsg}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleAdminAddTeacher} className="flex flex-col gap-3.5 text-xs">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-bold text-slate-700">Nama Lengkap & Gelar Guru:</label>
+                      <input
+                        type="text"
+                        required
+                        value={adminNewTeacherName}
+                        onChange={(e) => setAdminNewTeacherName(e.target.value)}
+                        placeholder="Contoh: Bapak I Sumayasa, M.Pd"
+                        className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:border-rose-500 font-medium"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-bold text-slate-700">Alamat Email Guru (Username Login):</label>
+                      <input
+                        type="email"
+                        required
+                        value={adminNewTeacherEmail}
+                        onChange={(e) => setAdminNewTeacherEmail(e.target.value)}
+                        placeholder="Contoh: isumayasa91@guru.smp.belajar.id"
+                        className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:border-rose-500 font-medium"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-bold text-slate-700">Kata Sandi / PIN Awal:</label>
+                      <input
+                        type="text"
+                        required
+                        value={adminNewTeacherPassword}
+                        onChange={(e) => setAdminNewTeacherPassword(e.target.value)}
+                        placeholder="password123"
+                        className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:border-rose-500 font-mono font-medium"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-bold text-slate-700">Penugasan Kelas / Peran:</label>
+                      <select
+                        value={adminNewTeacherClass}
+                        onChange={(e) => setAdminNewTeacherClass(e.target.value)}
+                        className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white font-bold text-slate-700 focus:outline-none focus:border-rose-500"
+                      >
+                        <optgroup label="Wali Kelas VII">
+                          <option value="Kelas VII A">Wali Kelas VII A</option>
+                          <option value="Kelas VII B">Wali Kelas VII B</option>
+                          <option value="Kelas VII C">Wali Kelas VII C</option>
+                          <option value="Kelas VII D">Wali Kelas VII D</option>
+                          <option value="Kelas VII E">Wali Kelas VII E</option>
+                        </optgroup>
+                        <optgroup label="Wali Kelas VIII">
+                          <option value="Kelas VIII A">Wali Kelas VIII A</option>
+                          <option value="Kelas VIII B">Wali Kelas VIII B</option>
+                          <option value="Kelas VIII C">Wali Kelas VIII C</option>
+                          <option value="Kelas VIII D">Wali Kelas VIII D</option>
+                          <option value="Kelas VIII E">Wali Kelas VIII E</option>
+                        </optgroup>
+                        <optgroup label="Wali Kelas IX">
+                          <option value="Kelas IX A">Wali Kelas IX A</option>
+                          <option value="Kelas IX B">Wali Kelas IX B</option>
+                          <option value="Kelas IX C">Wali Kelas IX C</option>
+                          <option value="Kelas IX D">Wali Kelas IX D</option>
+                          <option value="Kelas IX E">Wali Kelas IX E</option>
+                        </optgroup>
+                        <option value="Guru BK (Konselor)">Guru Bimbingan Konseling (BK)</option>
+                        <option value="Umum">Guru Mata Pelajaran / Umum</option>
+                      </select>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="mt-2 py-3 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5 active:scale-95"
+                    >
+                      <Plus className="w-4 h-4" /> Daftarkan Akun Guru ke Cloud
+                    </button>
+                  </form>
+                </div>
+
+                {/* List of Teachers */}
+                <div className="lg:col-span-7 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col gap-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <span className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">👩‍🏫</span>
+                      <h4 className="font-extrabold text-sm text-slate-800">Daftar Akun Guru Terdaftar</h4>
+                    </div>
+                    <span className="text-xs font-bold bg-slate-100 px-3 py-1 rounded-full text-slate-600">
+                      Total: {teachers.length} Guru
+                    </span>
+                  </div>
+
+                  {teachers.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 text-xs">
+                      Belum ada guru terdaftar di database.
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {teachers.map((t) => (
+                        <div
+                          key={t.id}
+                          className="flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-2xl transition-all"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+                              👩‍🏫
+                            </span>
+                            <div>
+                              <p className="font-extrabold text-xs text-slate-800">{t.name}</p>
+                              <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-500">
+                                <span>📧 {t.email}</span>
+                                <span className="text-slate-300">•</span>
+                                <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold">
+                                  {t.class}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleAdminDeleteTeacher(t.id, t.name)}
+                              title="Hapus akun guru"
+                              className="p-2 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors border border-transparent hover:border-rose-200"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: KELOLA & DAFTARKAN SISWA */}
+            {adminTab === 'students' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Form Daftarkan Siswa Baru */}
+                <div className="lg:col-span-5 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col gap-4">
+                  <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
+                    <span className="p-2 bg-sky-50 text-sky-600 rounded-xl"><UserPlus className="w-5 h-5" /></span>
+                    <div>
+                      <h4 className="font-extrabold text-sm text-slate-800">Daftarkan Profil Siswa Baru</h4>
+                      <p className="text-[11px] text-slate-500">Siswa akan langsung terhubung dengan Guru Wali yang dipilih.</p>
+                    </div>
+                  </div>
+
+                  {adminStudentSuccessMsg && (
+                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold p-3 rounded-xl animate-fade-in">
+                      {adminStudentSuccessMsg}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleAdminAddStudent} className="flex flex-col gap-3.5 text-xs">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-bold text-slate-700">Nama Lengkap Siswa:</label>
+                      <input
+                        type="text"
+                        required
+                        value={adminNewStudentName}
+                        onChange={(e) => setAdminNewStudentName(e.target.value)}
+                        placeholder="Contoh: Budi Setiawan"
+                        className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:border-sky-500 font-medium"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="font-bold text-slate-700">Kelas Siswa:</label>
+                        <select
+                          value={adminNewStudentClass}
+                          onChange={(e) => setAdminNewStudentClass(e.target.value)}
+                          className="px-3 py-2.5 border-2 border-slate-200 rounded-xl bg-white font-bold text-slate-700 focus:outline-none focus:border-sky-500"
+                        >
+                          <optgroup label="Kelas VII">
+                            <option value="Kelas VII A">Kelas VII A</option>
+                            <option value="Kelas VII B">Kelas VII B</option>
+                            <option value="Kelas VII C">Kelas VII C</option>
+                            <option value="Kelas VII D">Kelas VII D</option>
+                            <option value="Kelas VII E">Kelas VII E</option>
+                          </optgroup>
+                          <optgroup label="Kelas VIII">
+                            <option value="Kelas VIII A">Kelas VIII A</option>
+                            <option value="Kelas VIII B">Kelas VIII B</option>
+                            <option value="Kelas VIII C">Kelas VIII C</option>
+                            <option value="Kelas VIII D">Kelas VIII D</option>
+                            <option value="Kelas VIII E">Kelas VIII E</option>
+                          </optgroup>
+                          <optgroup label="Kelas IX">
+                            <option value="Kelas IX A">Kelas IX A</option>
+                            <option value="Kelas IX B">Kelas IX B</option>
+                            <option value="Kelas IX C">Kelas IX C</option>
+                            <option value="Kelas IX D">Kelas IX D</option>
+                            <option value="Kelas IX E">Kelas IX E</option>
+                          </optgroup>
+                        </select>
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label className="font-bold text-slate-700">Pilih Avatar:</label>
+                        <div className="grid grid-cols-4 gap-1 p-1 bg-slate-50 rounded-xl border border-slate-200">
+                          {['👦', '👧', '🧑', '👨'].map((av) => (
+                            <button
+                              key={av}
+                              type="button"
+                              onClick={() => setAdminNewStudentAvatar(av)}
+                              className={`py-1 text-sm rounded-lg transition-all ${adminNewStudentAvatar === av ? 'bg-sky-500 text-white shadow-sm' : 'hover:bg-slate-200'}`}
+                            >
+                              {av}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-bold text-slate-700">Guru Wali Pengasuh:</label>
+                      <select
+                        value={adminNewStudentGuruWali}
+                        onChange={(e) => setAdminNewStudentGuruWali(e.target.value)}
+                        className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white font-bold text-slate-700 focus:outline-none focus:border-sky-500"
+                      >
+                        {teachers.map((t) => (
+                          <option key={t.id} value={t.name}>
+                            {t.name} ({t.class})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="mt-2 py-3 bg-sky-500 hover:bg-sky-400 text-white font-extrabold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5 active:scale-95"
+                    >
+                      <Plus className="w-4 h-4" /> Daftarkan Siswa ke Cloud
+                    </button>
+                  </form>
+                </div>
+
+                {/* List of Students */}
+                <div className="lg:col-span-7 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col gap-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <span className="p-2 bg-sky-50 text-sky-600 rounded-xl">🎒</span>
+                      <h4 className="font-extrabold text-sm text-slate-800">Daftar Siswa Terdaftar</h4>
+                    </div>
+                    <span className="text-xs font-bold bg-slate-100 px-3 py-1 rounded-full text-slate-600">
+                      Total: {students.length} Siswa
+                    </span>
+                  </div>
+
+                  {students.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 text-xs">
+                      Belum ada murid terdaftar di database.
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {students.map((st) => {
+                        const count = stories.filter(s => s.studentId === st.id).length;
+                        return (
+                          <div
+                            key={st.id}
+                            className="flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-2xl transition-all"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="text-2xl bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+                                {st.avatar || '👦'}
+                              </span>
+                              <div>
+                                <p className="font-extrabold text-xs text-slate-800">{st.name}</p>
+                                <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-500">
+                                  <span className="bg-sky-50 text-sky-700 px-2 py-0.5 rounded-full font-bold">{st.class}</span>
+                                  <span className="text-slate-300">•</span>
+                                  <span>Wali: {st.guruWali}</span>
+                                  <span className="text-slate-300">•</span>
+                                  <span className="text-emerald-600 font-bold">{count} Cerita</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => handleDeleteStudent(st.id, st.name)}
+                              title="Hapus siswa"
+                              className="p-2 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors border border-transparent hover:border-rose-200"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: REKAP STATISTIK & MONITORING */}
+            {adminTab === 'stats' && (
+              <div className="flex flex-col gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex items-center gap-4">
+                    <span className="p-3 bg-sky-50 text-sky-600 rounded-2xl text-2xl">🎒</span>
+                    <div>
+                      <p className="text-xs text-slate-500 font-bold">Total Siswa</p>
+                      <p className="text-2xl font-black text-slate-800">{students.length}</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex items-center gap-4">
+                    <span className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl text-2xl">👩‍🏫</span>
+                    <div>
+                      <p className="text-xs text-slate-500 font-bold">Total Guru</p>
+                      <p className="text-2xl font-black text-slate-800">{teachers.length}</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex items-center gap-4">
+                    <span className="p-3 bg-amber-50 text-amber-600 rounded-2xl text-2xl">📖</span>
+                    <div>
+                      <p className="text-xs text-slate-500 font-bold">Jurnal Refleksi 4F</p>
+                      <p className="text-2xl font-black text-slate-800">{stories.length}</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex items-center gap-4">
+                    <span className="p-3 bg-rose-50 text-rose-600 rounded-2xl text-2xl">🩺</span>
+                    <div>
+                      <p className="text-xs text-slate-500 font-bold">Eskalasi BK Aktif</p>
+                      <p className="text-2xl font-black text-rose-600">
+                        {stories.filter(s => s.escalated && s.status !== 'Teratasi').length}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Cloud Sync Details Card */}
+                <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm flex flex-col gap-3">
+                  <h4 className="font-extrabold text-sm text-slate-800 flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-600" /> Status Database Cloud Firestore
+                  </h4>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Database CERDAS terhubung langsung ke Firebase Firestore dengan sinkronisasi multi-klien secara real-time. Setiap penambahan akun guru, siswa, atau penulisan cerita 4F langsung direplikasi secara instan di Google AI Studio, Vercel, maupun perangkat pengguna lainnya tanpa jeda.
+                  </p>
+                </div>
+              </div>
+            )}
+
           </div>
         )}
 

@@ -272,6 +272,27 @@ export async function registerTeacherToFirestore(data: { name: string; email: st
   }
 }
 
+// Delete Teacher
+export async function deleteTeacherFromFirestore(teacherId: string) {
+  try {
+    await deleteDoc(doc(db, 'teachers', teacherId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `teachers/${teacherId}`);
+    throw error;
+  }
+}
+
+// Update Teacher
+export async function updateTeacherInFirestore(teacherId: string, updates: Partial<Teacher>) {
+  try {
+    const ref = doc(db, 'teachers', teacherId);
+    await updateDoc(ref, updates);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `teachers/${teacherId}`);
+    throw error;
+  }
+}
+
 // Update Guru Note on Story
 export async function updateGuruNoteInFirestore(storyId: string, guruNote: string) {
   try {
