@@ -193,6 +193,7 @@ export default function App() {
   const [role, setRole] = useState<'murid' | 'guru_wali' | 'guru_bk'>('murid');
   const [students, setStudents] = useState<any[]>([]);
   const [stories, setStories] = useState<any[]>([]);
+  const [teachers, setTeachers] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
   
   // Murid state variables
@@ -269,6 +270,13 @@ export default function App() {
       const resStories = await fetch('/api/stories');
       const dataStories = await resStories.json();
       setStories(dataStories);
+
+      const resTeachers = await fetch('/api/teachers');
+      const dataTeachers = await resTeachers.json();
+      setTeachers(dataTeachers);
+      if (dataTeachers.length > 0) {
+        setNewStudentGuruWali(dataTeachers[0].name);
+      }
       
       // Select first student as default if none selected
       if (dataStudents.length > 0 && !selectedStudent) {
@@ -664,6 +672,8 @@ export default function App() {
         setAuthPassword('');
         setAuthMode('login');
         playTone(523.25, 'sine', 0.15);
+        // Refresh dynamic list of teachers immediately
+        loadData();
       } else {
         setAuthError(data.error || 'Pendaftaran gagal');
       }
@@ -2379,16 +2389,17 @@ export default function App() {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="font-bold text-slate-600">Guru Wali Kelas:</label>
+                <label className="font-bold text-slate-600">Guru Wali:</label>
                 <select
                   value={newStudentGuruWali}
                   onChange={(e) => setNewStudentGuruWali(e.target.value)}
                   className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white focus:outline-none font-medium"
                 >
-                  <option value="Ibu Rahma, S.Pd">Ibu Rahma, S.Pd (Kelas VII)</option>
-                  <option value="Bapak I Sumayasa, M.Pd">Bapak I Sumayasa, M.Pd (Kelas VIII)</option>
-                  <option value="Bapak Deni Saputra, S.Pd">Bapak Deni Saputra, S.Pd (Kelas IX)</option>
-                  <option value="Ibu Sri Wahyuni, S.Pd">Ibu Sri Wahyuni, S.Pd (Umum)</option>
+                  {teachers.map((t: any) => (
+                    <option key={t.id} value={t.name}>
+                      {t.name} ({t.class})
+                    </option>
+                  ))}
                 </select>
               </div>
 

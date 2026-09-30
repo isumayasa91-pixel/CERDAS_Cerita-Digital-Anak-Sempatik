@@ -510,7 +510,9 @@ app.post('/api/stories/:id/resolve', (req, res) => {
 
 // Serve frontend assets
 const distPath = path.join(__dirname, 'dist');
-if (process.env.NODE_ENV === 'production' || fs.existsSync(distPath)) {
+if (process.env.VERCEL) {
+  // On Vercel Serverless Function, static assets are served directly by Vercel CDN
+} else if (process.env.NODE_ENV === 'production' || fs.existsSync(distPath)) {
   app.use(express.static(distPath));
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'API not found' });
