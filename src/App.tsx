@@ -664,6 +664,94 @@ export default function App() {
     }, 200);
   };
 
+  // Print Teacher Credentials (Single or All)
+  const handlePrintTeacherCredentials = (teacherList: Teacher[], title: string) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Gagal membuka jendela cetak. Mohon izinkan popup di browser Anda.");
+      return;
+    }
+
+    const appUrl = window.location.origin;
+
+    const cardsHtml = teacherList.map((t) => `
+      <div style="border: 2px solid #0284c7; border-radius: 16px; padding: 20px; margin-bottom: 20px; page-break-inside: avoid; background-color: #f0f9ff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #bae6fd; padding-bottom: 10px; margin-bottom: 12px;">
+          <div>
+            <h2 style="margin: 0; color: #0369a1; font-size: 18px; font-weight: 800;">KARTU AKSES LOGIN GURU WALI / GURU BK</h2>
+            <p style="margin: 2px 0 0 0; color: #0284c7; font-size: 11px; font-weight: 600;">Aplikasi CERDAS (Ceria, Empati, Reflektif, Dampingi Anak Sahabat)</p>
+          </div>
+          <span style="background-color: #0284c7; color: white; padding: 4px 12px; border-radius: 20px; font-weight: bold; font-size: 11px;">
+            RESMI & RAHASIA
+          </span>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #1e293b;">
+          <tr>
+            <td style="padding: 6px 0; font-weight: bold; width: 140px; color: #475569;">Nama Guru:</td>
+            <td style="padding: 6px 0; font-weight: 800; color: #0f172a; font-size: 14px;">${t.name}</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; font-weight: bold; color: #475569;">Penugasan Kelas:</td>
+            <td style="padding: 6px 0; font-weight: bold; color: #0284c7;">${t.class || 'Umum'}</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; font-weight: bold; color: #475569;">Email (Username):</td>
+            <td style="padding: 6px 0; font-family: monospace; font-size: 14px; font-weight: bold; color: #0369a1;">${t.email}</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; font-weight: bold; color: #475569;">Password / PIN:</td>
+            <td style="padding: 6px 0; font-family: monospace; font-size: 15px; font-weight: 900; color: #be123c; background-color: #ffe4e6; display: inline-block; padding: 2px 8px; border-radius: 6px;">${t.password || 'password123'}</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; font-weight: bold; color: #475569;">Alamat URL Web:</td>
+            <td style="padding: 6px 0; font-size: 11px; color: #64748b; word-break: break-all;">${appUrl}</td>
+          </tr>
+        </table>
+
+        <div style="margin-top: 14px; padding: 10px; background-color: #ffffff; border: 1px dashed #93c5fd; border-radius: 10px; font-size: 11px; color: #334155;">
+          <strong>💡 Panduan Login Singkat Guru:</strong>
+          <ol style="margin: 4px 0 0 18px; padding: 0;">
+            <li>Buka alamat web aplikasi CERDAS di atas menggunakan browser HP atau Laptop.</li>
+            <li>Pada layar utama, pilih menu <strong>"Masuk sebagai Guru Wali"</strong>.</li>
+            <li>Masukkan <strong>Email</strong> dan <strong>Password</strong> sesuai data kartu ini.</li>
+            <li>Tekan tombol <strong>"Masuk Sekarang"</strong> untuk memantau emosi murid.</li>
+          </ol>
+        </div>
+      </div>
+    `).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${title}</title>
+          <style>
+            body { font-family: 'Segoe UI', Arial, sans-serif; padding: 20px; background-color: #fff; }
+            @media print {
+              body { padding: 0; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="no-print" style="margin-bottom: 20px; text-align: center;">
+            <button onclick="window.print()" style="background-color: #0284c7; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-size: 14px; font-weight: bold; cursor: pointer;">
+              🖨️ Cetak Kartu Akses Guru
+            </button>
+          </div>
+          <h1 style="text-align: center; color: #0f172a; font-size: 20px; margin-bottom: 20px;">
+            ${title}
+          </h1>
+          ${cardsHtml}
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    playTone(523, 'sine', 0.1);
+  };
+
   // Mark story issue as resolved
   const handleResolveStory = async (storyId: string) => {
     try {
@@ -3335,14 +3423,24 @@ export default function App() {
 
                 {/* List of Teachers */}
                 <div className="lg:col-span-7 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col gap-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
                     <div className="flex items-center gap-2">
                       <span className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">👩‍🏫</span>
                       <h4 className="font-extrabold text-sm text-slate-800">Daftar Akun Guru Terdaftar</h4>
                     </div>
-                    <span className="text-xs font-bold bg-slate-100 px-3 py-1 rounded-full text-slate-600">
-                      Total: {teachers.length} Guru
-                    </span>
+                    <div className="flex items-center gap-2 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => handlePrintTeacherCredentials(teachers, 'Daftar Kartu Akses Login Semua Guru Wali & BK')}
+                        className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all"
+                        title="Cetak Kartu Akses Login untuk seluruh Guru Wali & BK"
+                      >
+                        <Printer className="w-3.5 h-3.5" /> Cetak Akses Semua Guru
+                      </button>
+                      <span className="text-xs font-bold bg-slate-100 px-3 py-1 rounded-full text-slate-600">
+                        Total: {teachers.length} Guru
+                      </span>
+                    </div>
                   </div>
 
                   {teachers.length === 0 ? (
@@ -3354,7 +3452,7 @@ export default function App() {
                       {teachers.map((t) => (
                         <div
                           key={t.id}
-                          className="flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-2xl transition-all"
+                          className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-2xl transition-all gap-3"
                         >
                           <div className="flex items-center gap-3">
                             <span className="text-2xl bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
@@ -3362,8 +3460,12 @@ export default function App() {
                             </span>
                             <div>
                               <p className="font-extrabold text-xs text-slate-800">{t.name}</p>
-                              <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-500">
-                                <span>📧 {t.email}</span>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-0.5 text-[11px] text-slate-500">
+                                <span className="font-medium">📧 {t.email}</span>
+                                <span className="text-slate-300">•</span>
+                                <span className="bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full font-mono font-bold">
+                                  🔑 {t.password || 'password123'}
+                                </span>
                                 <span className="text-slate-300">•</span>
                                 <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold">
                                   {t.class}
@@ -3372,14 +3474,22 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 self-end sm:self-center">
+                            <button
+                              type="button"
+                              onClick={() => handlePrintTeacherCredentials([t], `Kartu Akses Login Guru - ${t.name}`)}
+                              title="Cetak Kartu Akses Login untuk Guru ini"
+                              className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 font-extrabold text-[11px] rounded-xl transition-colors border border-sky-200 flex items-center gap-1 shadow-sm"
+                            >
+                              <Printer className="w-3.5 h-3.5 text-sky-600" /> Cetak Akses
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleOpenEditTeacher(t)}
                               title="Edit Data Akun Guru (Perbaiki Nama, Email, Password, atau Kelas)"
                               className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-[11px] rounded-xl transition-colors border border-indigo-200 flex items-center gap-1 shadow-sm"
                             >
-                              <Edit className="w-3.5 h-3.5 text-indigo-600" /> Edit Akun
+                              <Edit className="w-3.5 h-3.5 text-indigo-600" /> Edit
                             </button>
                             <button
                               onClick={() => handleAdminDeleteTeacher(t.id, t.name)}
