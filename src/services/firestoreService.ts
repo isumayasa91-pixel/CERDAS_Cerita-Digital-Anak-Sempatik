@@ -35,6 +35,7 @@ export interface Story {
   id: string;
   studentId: string;
   studentName: string;
+  guruWali?: string;
   timestamp: string;
   fact: string;
   feeling: string;
@@ -147,6 +148,73 @@ export async function seedInitialFirestoreData() {
   }
 }
 
+// Function to bulk generate 465 students across Grade 7, 8, 9 (15 classes x 31 students)
+export async function seedFullRoster465StudentsToFirestore(): Promise<number> {
+  const firstNames = [
+    'Prama', 'Budi', 'Siti', 'Andi', 'Putu', 'Made', 'Kadek', 'Nyoman', 'Ketut', 'Ahmad',
+    'Dewa', 'Nia', 'Gede', 'Luh', 'Wayan', 'Cantika', 'Deni', 'Eka', 'Farhan', 'Gilang',
+    'Hani', 'Indah', 'Joko', 'Kiki', 'Lintang', 'Muhammad', 'Nabila', 'Oktavia', 'Pratiwi', 'Rian',
+    'Salsa', 'Taufik', 'Utama', 'Vania', 'Wahyu', 'Yulia', 'Zikri', 'Agus', 'Bintang', 'Citra'
+  ];
+
+  const lastNames = [
+    'Setiawan', 'Pratama', 'Widya', 'Lestari', 'Suardana', 'Wibawa', 'Rahma', 'Prasetyo',
+    'Kencana', 'Laksmi', 'Permana', 'Saputra', 'Sari', 'Utami', 'Firmansyah', 'Suryani',
+    'Hidayat', 'Anggraini', 'Wijaya', 'Febrian', 'Mahardika', 'Kusuma', 'Santoso', 'Yuda'
+  ];
+
+  const classes = [
+    { name: 'Kelas VII A', guru: 'Ibu Rahma, S.Pd' },
+    { name: 'Kelas VII B', guru: 'Ibu Rahma, S.Pd' },
+    { name: 'Kelas VII C', guru: 'Ibu Rahma, S.Pd' },
+    { name: 'Kelas VII D', guru: 'Ibu Rahma, S.Pd' },
+    { name: 'Kelas VII E', guru: 'Ibu Rahma, S.Pd' },
+
+    { name: 'Kelas VIII A', guru: 'Bapak I Sumayasa, M.Pd' },
+    { name: 'Kelas VIII B', guru: 'Bapak I Sumayasa, M.Pd' },
+    { name: 'Kelas VIII C', guru: 'Bapak I Sumayasa, M.Pd' },
+    { name: 'Kelas VIII D', guru: 'Bapak I Sumayasa, M.Pd' },
+    { name: 'Kelas VIII E', guru: 'Bapak I Sumayasa, M.Pd' },
+
+    { name: 'Kelas IX A', guru: 'Bapak Deni Saputra, S.Pd' },
+    { name: 'Kelas IX B', guru: 'Bapak Deni Saputra, S.Pd' },
+    { name: 'Kelas IX C', guru: 'Bapak Deni Saputra, S.Pd' },
+    { name: 'Kelas IX D', guru: 'Bapak Deni Saputra, S.Pd' },
+    { name: 'Kelas IX E', guru: 'Bapak Deni Saputra, S.Pd' },
+  ];
+
+  let count = 0;
+  try {
+    for (const cls of classes) {
+      // 31 students per class x 15 classes = 465 students
+      for (let i = 1; i <= 31; i++) {
+        const fn = firstNames[(count + i * 3) % firstNames.length];
+        const ln = lastNames[(count + i * 7) % lastNames.length];
+        const isGirl = ['Siti', 'Nia', 'Luh', 'Cantika', 'Hani', 'Indah', 'Kiki', 'Nabila', 'Oktavia', 'Pratiwi', 'Salsa', 'Vania', 'Yulia', 'Citra'].includes(fn);
+        const avatar = isGirl ? '👧' : '👦';
+        const studentId = `st-roster-${cls.name.replace(/\s+/g, '-').toLowerCase()}-${i}`;
+        
+        const newStudent: Student = {
+          id: studentId,
+          name: `${fn} ${ln}`,
+          class: cls.name,
+          avatar: avatar,
+          status: 'Aktif',
+          guruWali: cls.guru,
+          createdAt: new Date().toISOString()
+        };
+
+        await setDoc(doc(db, 'students', studentId), newStudent);
+        count++;
+      }
+    }
+    return count;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, 'bulk-students');
+    throw error;
+  }
+}
+
 // Subscribe to Students collection in real-time
 export function subscribeStudents(callback: (students: Student[]) => void) {
   return onSnapshot(
@@ -210,6 +278,17 @@ export async function saveStoryToFirestore(storyData: Omit<Story, 'id'> & { id?:
     return finalStory;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `stories/${storyId}`);
+    throw error;
+  }
+}
+
+// Update Student
+export async function updateStudentInFirestore(studentId: string, updates: Partial<Student>) {
+  try {
+    const ref = doc(db, 'students', studentId);
+    await updateDoc(ref, updates);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `students/${studentId}`);
     throw error;
   }
 }

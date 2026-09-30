@@ -33,18 +33,24 @@ import {
   Lock,
   LogOut,
   RefreshCw,
-  UserPlus
+  UserPlus,
+  Printer,
+  Edit,
+  X
 } from 'lucide-react';
 import {
   seedInitialFirestoreData,
+  seedFullRoster465StudentsToFirestore,
   subscribeStudents,
   subscribeTeachers,
   subscribeStories,
   saveStoryToFirestore,
   addStudentToFirestore,
   deleteStudentFromFirestore,
+  updateStudentInFirestore,
   registerTeacherToFirestore,
   deleteTeacherFromFirestore,
+  updateTeacherInFirestore,
   updateGuruNoteInFirestore,
   escalateStoryInFirestore,
   updateCounselorNoteInFirestore,
@@ -228,13 +234,16 @@ export default function App() {
   const [step, setStep] = useState(1); // 1 to 4 (Fact, Feeling, Finding, Future), 5 is Review/Success
   const [factText, setFactText] = useState('');
   const [selectedFeeling, setSelectedFeeling] = useState<string>('Gembira');
+  const [feelingReasonText, setFeelingReasonText] = useState('');
   const [findingText, setFindingText] = useState('');
   const [futureText, setFutureText] = useState('');
+  const [futureTopic, setFutureTopic] = useState<'Sekolah' | 'Rumah' | 'Teman' | 'Hobi' | 'Cita-Cita'>('Sekolah');
   const [recordedAudio, setRecordedAudio] = useState<string>(''); // base64
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successConfetti, setSuccessConfetti] = useState(false);
 
   // Audio Recording States
+  const [showRoleUnlockModal, setShowRoleUnlockModal] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -257,6 +266,19 @@ export default function App() {
   // Guru BK & Orang Tua dashboard state
   const [bkSearch, setBkSearch] = useState('');
   const [counselorActionNote, setCounselorActionNote] = useState('');
+
+  // Print & PDF Export State
+  const [printableData, setPrintableData] = useState<{
+    type: 'single_story' | 'class_summary' | 'counseling_report';
+    story?: any;
+    storiesList?: any[];
+    title?: string;
+  } | null>(null);
+
+  // Student Directory Filter & Capacity States (Supports 465+ Students)
+  const [studentClassFilter, setStudentClassFilter] = useState('Semua');
+  const [studentSearchTerm, setStudentSearchTerm] = useState('');
+  const [isGenerating465, setIsGenerating465] = useState(false);
 
   // Form for adding student
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
@@ -300,7 +322,7 @@ export default function App() {
   const [adminNewTeacherName, setAdminNewTeacherName] = useState('');
   const [adminNewTeacherEmail, setAdminNewTeacherEmail] = useState('');
   const [adminNewTeacherPassword, setAdminNewTeacherPassword] = useState('password123');
-  const [adminNewTeacherClass, setAdminNewTeacherClass] = useState('Kelas VII A');
+  const [adminNewTeacherClasses, setAdminNewTeacherClasses] = useState<string[]>(['Kelas VII A']);
   const [adminTeacherSuccessMsg, setAdminTeacherSuccessMsg] = useState('');
 
   // Admin New Student Form
@@ -309,6 +331,20 @@ export default function App() {
   const [adminNewStudentAvatar, setAdminNewStudentAvatar] = useState('👦');
   const [adminNewStudentGuruWali, setAdminNewStudentGuruWali] = useState('Ibu Rahma, S.Pd');
   const [adminStudentSuccessMsg, setAdminStudentSuccessMsg] = useState('');
+
+  // Edit Teacher Modal State
+  const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
+  const [editTeacherName, setEditTeacherName] = useState('');
+  const [editTeacherEmail, setEditTeacherEmail] = useState('');
+  const [editTeacherPassword, setEditTeacherPassword] = useState('');
+  const [editTeacherClasses, setEditTeacherClasses] = useState<string[]>([]);
+
+  // Edit Student Modal State
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [editStudentName, setEditStudentName] = useState('');
+  const [editStudentClass, setEditStudentClass] = useState('Kelas VII A');
+  const [editStudentAvatar, setEditStudentAvatar] = useState('👦');
+  const [editStudentGuruWali, setEditStudentGuruWali] = useState('Ibu Rahma, S.Pd');
 
   // Initialize Real-time Firestore Subscriptions and Seeding
   useEffect(() => {
@@ -512,12 +548,17 @@ export default function App() {
         console.warn("Backend AI proxy optional, proceeding with direct Firestore write:", err);
       }
 
+      const fullFeelingText = feelingReasonText.trim()
+        ? `${selectedFeeling} (Alasan: ${feelingReasonText.trim()})`
+        : selectedFeeling;
+
       await saveStoryToFirestore({
         studentId: selectedStudent.id,
         studentName: selectedStudent.name,
+        guruWali: selectedStudent.guruWali || 'Ibu Rahma, S.Pd',
         timestamp: new Date().toISOString(),
         fact: factText,
-        feeling: selectedFeeling,
+        feeling: fullFeelingText,
         character: activeChar?.id || 'Giga',
         finding: findingText,
         future: futureText,
@@ -540,6 +581,7 @@ export default function App() {
 
       // Reset fields
       setFactText('');
+      setFeelingReasonText('');
       setFindingText('');
       setFutureText('');
       setRecordedAudio('');
@@ -602,6 +644,25 @@ export default function App() {
     }
   };
 
+  // Helper function to trigger report printing
+  const handlePrintReport = (
+    type: 'single_story' | 'class_summary' | 'counseling_report',
+    story?: any,
+    storiesList?: any[],
+    title?: string
+  ) => {
+    setPrintableData({
+      type,
+      story,
+      storiesList,
+      title: title || (type === 'single_story' ? 'LAPORAN INDIVIDUAL JURNAL REFLEKSI EMOSI' : type === 'class_summary' ? 'REKAPITULASI JURNAL EMOSI KELAS' : 'LAPORAN BIMBINGAN & KONSELING (BK)')
+    });
+    playTone(523, 'sine', 0.1);
+    setTimeout(() => {
+      window.print();
+    }, 200);
+  };
+
   // Mark story issue as resolved
   const handleResolveStory = async (storyId: string) => {
     try {
@@ -613,14 +674,22 @@ export default function App() {
     }
   };
 
-  // Add new student
+  // Add new student (With 1-time registration check)
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStudentName.trim()) return;
+    const cleanName = newStudentName.trim();
+    if (!cleanName) return;
+
+    // Check 1-time registration constraint
+    const existing = students.find(s => s.name.trim().toLowerCase() === cleanName.toLowerCase());
+    if (existing) {
+      alert(`⚠️ Siswa dengan nama "${cleanName}" sudah terdaftar dalam sistem CERDAS!\n\nSetiap anak hanya dapat mendaftar 1 kali. Jika ingin mendaftar ulang, minta Admin untuk mereset akun siswa di Menu Admin terlebih dahulu.`);
+      return;
+    }
 
     try {
       const newStud = await addStudentToFirestore({
-        name: newStudentName.trim(),
+        name: cleanName,
         class: newStudentClass,
         avatar: newStudentAvatar,
         guruWali: newStudentGuruWali
@@ -632,6 +701,23 @@ export default function App() {
     } catch (err) {
       console.error(err);
       alert("Gagal menambahkan siswa ke Firestore.");
+    }
+  };
+
+  // Reset student account (Admin feature)
+  const handleResetStudent = async (studentId: string, name: string) => {
+    if (!window.confirm(`Apakah Anda yakin ingin MERESET akun siswa "${name}"?\n\nIni akan menghapus akun agar siswa dapat mendaftar ulang secara bersih.`)) {
+      return;
+    }
+
+    try {
+      await deleteStudentFromFirestore(studentId, stories);
+      playTone(523.25, 'sine', 0.2);
+      setAdminStudentSuccessMsg(`✅ Akun siswa "${name}" berhasil di-reset oleh Admin! Siswa kini dapat mendaftar kembali.`);
+      setTimeout(() => setAdminStudentSuccessMsg(''), 6000);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal mereset akun siswa.");
     }
   };
 
@@ -813,16 +899,19 @@ export default function App() {
         return;
       }
 
+      const classAssigned = adminNewTeacherClasses.length > 0 ? adminNewTeacherClasses.join(', ') : 'Umum';
+
       await registerTeacherToFirestore({
         name: adminNewTeacherName.trim(),
         email: adminNewTeacherEmail.trim(),
         password: adminNewTeacherPassword.trim(),
-        class: adminNewTeacherClass.trim()
+        class: classAssigned
       });
 
       setAdminNewTeacherName('');
       setAdminNewTeacherEmail('');
       setAdminNewTeacherPassword('password123');
+      setAdminNewTeacherClasses(['Kelas VII A']);
       setAdminTeacherSuccessMsg(`✅ Akun Guru "${adminNewTeacherName}" berhasil didaftarkan ke Cloud Firestore!`);
       setTimeout(() => setAdminTeacherSuccessMsg(''), 5000);
       playTone(523.25, 'sine', 0.15);
@@ -844,29 +933,111 @@ export default function App() {
     }
   };
 
-  // Admin registers new student
+  // Admin registers new student (With 1-time registration check)
   const handleAdminAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!adminNewStudentName.trim()) {
+    const cleanName = adminNewStudentName.trim();
+    if (!cleanName) {
       alert("Nama siswa wajib diisi!");
+      return;
+    }
+
+    // Check 1-time registration constraint
+    const existing = students.find(s => s.name.trim().toLowerCase() === cleanName.toLowerCase());
+    if (existing) {
+      alert(`⚠️ Siswa dengan nama "${cleanName}" sudah terdaftar sebelumnya!\n\nGunakan tombol "Reset Akun" di sebelah kanan jika ingin mendaftarkan ulang siswa ini.`);
       return;
     }
 
     try {
       await addStudentToFirestore({
-        name: adminNewStudentName.trim(),
+        name: cleanName,
         class: adminNewStudentClass,
         avatar: adminNewStudentAvatar,
         guruWali: adminNewStudentGuruWali
       });
 
       setAdminNewStudentName('');
-      setAdminStudentSuccessMsg(`✅ Akun Siswa "${adminNewStudentName}" berhasil didaftarkan ke Cloud Firestore!`);
+      setAdminStudentSuccessMsg(`✅ Akun Siswa "${cleanName}" berhasil didaftarkan ke Cloud Firestore!`);
       setTimeout(() => setAdminStudentSuccessMsg(''), 5000);
       playTone(523.25, 'sine', 0.15);
     } catch (err) {
       console.error(err);
       alert("Gagal mendaftarkan siswa.");
+    }
+  };
+
+  // Open Edit Teacher Modal
+  const handleOpenEditTeacher = (teacher: Teacher) => {
+    setEditingTeacher(teacher);
+    setEditTeacherName(teacher.name);
+    setEditTeacherEmail(teacher.email);
+    setEditTeacherPassword(teacher.password || 'password123');
+    const classesList = teacher.class ? teacher.class.split(',').map(c => c.trim()) : ['Umum'];
+    setEditTeacherClasses(classesList);
+    playTone(440, 'sine', 0.1);
+  };
+
+  // Submit Edit Teacher Form
+  const handleSaveEditTeacher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTeacher || !editTeacherName.trim() || !editTeacherEmail.trim()) {
+      alert("Nama dan email wajib diisi!");
+      return;
+    }
+
+    try {
+      const classAssigned = editTeacherClasses.length > 0 ? editTeacherClasses.join(', ') : 'Umum';
+      await updateTeacherInFirestore(editingTeacher.id, {
+        name: editTeacherName.trim(),
+        email: editTeacherEmail.trim().toLowerCase(),
+        password: editTeacherPassword.trim(),
+        class: classAssigned
+      });
+
+      setEditingTeacher(null);
+      setAdminTeacherSuccessMsg(`✅ Akun Guru "${editTeacherName}" telah berhasil diperbarui!`);
+      setTimeout(() => setAdminTeacherSuccessMsg(''), 5000);
+      playTone(523.25, 'sine', 0.15);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal memperbarui data guru.");
+    }
+  };
+
+  // Open Edit Student Modal
+  const handleOpenEditStudent = (student: Student) => {
+    setEditingStudent(student);
+    setEditStudentName(student.name);
+    setEditStudentClass(student.class);
+    setEditStudentAvatar(student.avatar || '👦');
+    setEditStudentGuruWali(student.guruWali || 'Ibu Rahma, S.Pd');
+    playTone(440, 'sine', 0.1);
+  };
+
+  // Submit Edit Student Form
+  const handleSaveEditStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStudent || !editStudentName.trim()) {
+      alert("Nama siswa wajib diisi!");
+      return;
+    }
+
+    try {
+      await updateStudentInFirestore(editingStudent.id, {
+        name: editStudentName.trim(),
+        class: editStudentClass,
+        avatar: editStudentAvatar,
+        guruWali: editStudentGuruWali
+      });
+
+      setEditingStudent(null);
+      setAdminStudentSuccessMsg(`✅ Profil Siswa "${editStudentName}" telah berhasil diperbarui!`);
+      setTimeout(() => setAdminStudentSuccessMsg(''), 5000);
+      playTone(523.25, 'sine', 0.15);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal memperbarui profil siswa.");
     }
   };
 
@@ -954,27 +1125,51 @@ export default function App() {
         <nav className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl max-w-lg w-auto overflow-x-auto">
           <button 
             onClick={() => { setRole('murid'); playTone(300, 'sine', 0.1); }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'murid' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'murid' ? 'bg-white text-sky-600 shadow-sm font-extrabold ring-1 ring-sky-300' : 'text-slate-600 hover:text-slate-900'}`}
           >
             🎒 <span className="hidden sm:inline">Ruang</span> Anak
           </button>
           <button 
-            onClick={() => { setRole('guru_wali'); playTone(350, 'sine', 0.1); }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'guru_wali' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+            onClick={() => {
+              if (role === 'murid') {
+                setShowRoleUnlockModal('guru_wali');
+                playTone(300, 'triangle', 0.15);
+              } else {
+                setRole('guru_wali');
+                playTone(350, 'sine', 0.1);
+              }
+            }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'guru_wali' ? 'bg-white text-indigo-600 shadow-sm font-extrabold' : 'text-slate-500 hover:text-slate-800'}`}
           >
-            👩‍🏫 <span className="hidden sm:inline">Ruang</span> Guru Wali
+            👩‍🏫 <span className="hidden sm:inline">Ruang</span> Guru Wali {role === 'murid' && <Lock className="w-3 h-3 text-slate-400" />}
           </button>
           <button 
-            onClick={() => { setRole('guru_bk'); playTone(400, 'sine', 0.1); }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'guru_bk' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+            onClick={() => {
+              if (role === 'murid') {
+                setShowRoleUnlockModal('guru_bk');
+                playTone(300, 'triangle', 0.15);
+              } else {
+                setRole('guru_bk');
+                playTone(400, 'sine', 0.1);
+              }
+            }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'guru_bk' ? 'bg-white text-emerald-600 shadow-sm font-extrabold' : 'text-slate-500 hover:text-slate-800'}`}
           >
-            🩺 <span className="hidden sm:inline">Ruang</span> BK & Ortu
+            🩺 <span className="hidden sm:inline">Ruang</span> BK & Ortu {role === 'murid' && <Lock className="w-3 h-3 text-slate-400" />}
           </button>
           <button 
-            onClick={() => { setRole('admin'); playTone(450, 'sine', 0.1); }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'admin' ? 'bg-rose-600 text-white shadow-sm' : 'text-rose-700 bg-rose-50 hover:bg-rose-100'}`}
+            onClick={() => {
+              if (role === 'murid') {
+                setShowRoleUnlockModal('admin');
+                playTone(300, 'triangle', 0.15);
+              } else {
+                setRole('admin');
+                playTone(450, 'sine', 0.1);
+              }
+            }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'admin' ? 'bg-rose-600 text-white shadow-sm font-extrabold' : 'text-rose-700 bg-rose-50 hover:bg-rose-100'}`}
           >
-            <Shield className="w-3.5 h-3.5" /> <span className="font-bold">Admin</span>
+            <Shield className="w-3.5 h-3.5" /> <span className="font-bold">Admin</span> {role === 'murid' && <Lock className="w-3 h-3 text-rose-400" />}
           </button>
         </nav>
 
@@ -983,7 +1178,7 @@ export default function App() {
           {role === 'murid' && selectedStudent ? (
             <div className="flex items-center gap-2 bg-sky-50 px-3 py-1 rounded-full border border-sky-100">
               <span className="text-lg">{selectedStudent.avatar}</span>
-              <span className="text-xs font-bold text-sky-700 truncate max-w-[100px]">{selectedStudent.name.split(' ')[0]}</span>
+              <span className="text-xs font-bold text-sky-700 truncate max-w-[180px]">{selectedStudent.name}</span>
             </div>
           ) : role === 'admin' ? (
             <div className="flex items-center gap-1.5 bg-rose-50 px-3 py-1 rounded-full border border-rose-200">
@@ -1014,55 +1209,131 @@ export default function App() {
             
             {/* Sidebar: Student Profile Selector & Fast Actions */}
             <div className="lg:col-span-3 flex flex-col gap-4">
-              <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-                <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-1">
-                  <span>👤</span> Pilih Akun Anak
-                </h3>
-                <div className="flex flex-col gap-1.5 max-h-[220px] overflow-y-auto pr-1">
-                  {students.map((st) => (
-                    <div
-                      key={st.id}
-                      className={`flex items-center justify-between gap-1 w-full p-1.5 rounded-xl transition-all border ${selectedStudent?.id === st.id ? 'bg-sky-500 border-sky-500 text-white shadow-md' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedStudent(st);
-                          setActiveTab('profile');
-                          setStep(1);
-                          playTone(329.63, 'sine', 0.1);
-                        }}
-                        className="flex items-center gap-3 flex-1 text-left focus:outline-none"
-                      >
-                        <span className="text-2xl bg-white/20 p-1.5 rounded-lg">{st.avatar}</span>
-                        <div className="truncate">
-                          <p className="font-bold text-sm leading-tight">{st.name}</p>
-                          <p className={`text-[10px] ${selectedStudent?.id === st.id ? 'text-white/85' : 'text-slate-500'}`}>
-                            {st.class} · Wali: {st.guruWali ? st.guruWali.split(',')[0] : 'Umum'}
-                          </p>
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteStudent(st.id, st.name);
-                        }}
-                        className={`p-2 rounded-lg transition-colors focus:outline-none ${selectedStudent?.id === st.id ? 'text-sky-100 hover:text-white hover:bg-white/15' : 'text-slate-400 hover:text-sky-600 hover:bg-sky-50'}`}
-                        title="Hapus Siswa"
-                      >
-                        <Trash2 className="w-4.5 h-4.5" />
-                      </button>
-                    </div>
-                  ))}
+              <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1">
+                    <span>👤</span> Pilih Akun Anak
+                  </h3>
+                  <span className="text-[10px] font-extrabold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">
+                    {students.length} Siswa
+                  </span>
                 </div>
 
-                <button
-                  onClick={() => setShowAddStudentModal(true)}
-                  className="mt-3 flex items-center justify-center gap-1.5 w-full py-2 border-2 border-dashed border-sky-300 rounded-xl text-sky-600 font-bold text-xs hover:bg-sky-50 transition-colors"
-                >
-                  <Plus className="w-4 h-4" /> Tambah Murid Baru
-                </button>
+                {/* Filter and Search Controls for 465 students */}
+                <div className="flex flex-col gap-2">
+                  <input
+                    type="text"
+                    placeholder="🔍 Cari nama murid (misal: Prama)..."
+                    value={studentSearchTerm}
+                    onChange={(e) => setStudentSearchTerm(e.target.value)}
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-sky-500 font-medium"
+                  />
+                  <select
+                    value={studentClassFilter}
+                    onChange={(e) => setStudentClassFilter(e.target.value)}
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:border-sky-500 font-bold text-slate-700"
+                  >
+                    <option value="Semua">Semua Jenjang & Kelas ({students.length})</option>
+                    <optgroup label="Kelas VII (Tujuh)">
+                      <option value="Kelas VII A">Kelas VII A</option>
+                      <option value="Kelas VII B">Kelas VII B</option>
+                      <option value="Kelas VII C">Kelas VII C</option>
+                      <option value="Kelas VII D">Kelas VII D</option>
+                      <option value="Kelas VII E">Kelas VII E</option>
+                    </optgroup>
+                    <optgroup label="Kelas VIII (Delapan)">
+                      <option value="Kelas VIII A">Kelas VIII A</option>
+                      <option value="Kelas VIII B">Kelas VIII B</option>
+                      <option value="Kelas VIII C">Kelas VIII C</option>
+                      <option value="Kelas VIII D">Kelas VIII D</option>
+                      <option value="Kelas VIII E">Kelas VIII E</option>
+                    </optgroup>
+                    <optgroup label="Kelas IX (Sembilan)">
+                      <option value="Kelas IX A">Kelas IX A</option>
+                      <option value="Kelas IX B">Kelas IX B</option>
+                      <option value="Kelas IX C">Kelas IX C</option>
+                      <option value="Kelas IX D">Kelas IX D</option>
+                      <option value="Kelas IX E">Kelas IX E</option>
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* Filtered Student List */}
+                <div className="flex flex-col gap-1.5 max-h-[240px] overflow-y-auto pr-1">
+                  {students
+                    .filter(st => {
+                      const matchesClass = studentClassFilter === 'Semua' || st.class === studentClassFilter;
+                      const matchesSearch = !studentSearchTerm.trim() || st.name.toLowerCase().includes(studentSearchTerm.toLowerCase());
+                      return matchesClass && matchesSearch;
+                    })
+                    .map((st) => (
+                      <div
+                        key={st.id}
+                        className={`flex items-center justify-between gap-1 w-full p-1.5 rounded-xl transition-all border ${selectedStudent?.id === st.id ? 'bg-sky-500 border-sky-500 text-white shadow-md' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedStudent(st);
+                            setActiveTab('profile');
+                            setStep(1);
+                            playTone(329.63, 'sine', 0.1);
+                          }}
+                          className="flex items-center gap-2.5 flex-1 text-left focus:outline-none overflow-hidden"
+                        >
+                          <span className="text-xl bg-white/20 p-1.5 rounded-lg shrink-0">{st.avatar}</span>
+                          <div className="truncate">
+                            <p className="font-bold text-xs leading-tight truncate">{st.name}</p>
+                            <p className={`text-[9px] ${selectedStudent?.id === st.id ? 'text-white/85' : 'text-slate-500'} truncate`}>
+                              {st.class} · {st.guruWali ? st.guruWali.split(',')[0] : 'Umum'}
+                            </p>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteStudent(st.id, st.name);
+                          }}
+                          className={`p-1.5 rounded-lg transition-colors focus:outline-none shrink-0 ${selectedStudent?.id === st.id ? 'text-sky-100 hover:text-white hover:bg-white/15' : 'text-slate-400 hover:text-sky-600 hover:bg-sky-50'}`}
+                          title="Hapus Siswa"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                </div>
+
+                <div className="flex flex-col gap-1.5 pt-1">
+                  <button
+                    onClick={() => setShowAddStudentModal(true)}
+                    className="flex items-center justify-center gap-1.5 w-full py-2 border-2 border-dashed border-sky-300 rounded-xl text-sky-600 font-bold text-xs hover:bg-sky-50 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" /> Tambah Murid Baru
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      if (confirm("Apakah Anda ingin membuat rombel 465 siswa lengkap (Kelas VII A-E, VIII A-E, IX A-E) secara otomatis di Cloud Firestore?")) {
+                        try {
+                          setIsGenerating465(true);
+                          const total = await seedFullRoster465StudentsToFirestore();
+                          alert(`Hebat! Berhasil membuat ${total} data siswa otomatis tersinkron ke Firestore!`);
+                          playTone(523, 'sine', 0.2);
+                        } catch (err) {
+                          console.error(err);
+                          alert("Gagal membuat data rombel siswa.");
+                        } finally {
+                          setIsGenerating465(false);
+                        }
+                      }
+                    }}
+                    disabled={isGenerating465}
+                    className="flex items-center justify-center gap-1.5 w-full py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-[11px] rounded-xl shadow-sm transition-all"
+                  >
+                    ⚡ {isGenerating465 ? 'Mengisi Database 465 Siswa...' : 'Isi Rombel 465 Siswa (15 Kelas)'}
+                  </button>
+                </div>
               </div>
 
               {/* Navigation Tabs for Children */}
@@ -1105,15 +1376,17 @@ export default function App() {
                         <div className="relative z-10 flex flex-col md:flex-row items-center gap-6">
                           <span className="text-6xl md:text-7xl bg-white/30 p-4 rounded-3xl backdrop-blur-sm animate-giga-bounce">{selectedStudent.avatar}</span>
                           <div className="text-center md:text-left">
-                            <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight mb-2 text-slate-900">Halo, {selectedStudent.name}! 👋</h2>
+                            <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight mb-2 text-slate-900">
+                              Hai, aku {selectedStudent.name}! ⭐
+                            </h2>
                             <p className="text-slate-800 text-sm md:text-base max-w-xl font-semibold leading-relaxed">
-                              Selamat datang di Ruang CERDAS! Hari ini adalah hari baru yang penuh petualangan. Karakter emosi lucumu sudah siap mendengarkan rahasia atau ceritamu hari ini lho!
+                              Selamat datang di Ruang CERDAS! Hari ini aku siap menceritakan pengalamanku dan memilih karakter emosi favoritku. Karakter emosi lucumu sudah siap mendengarkan cerita indahmu lho!
                             </p>
                             <button
                               onClick={() => { setActiveTab('story_builder'); setStep(1); playTone(523.25, 'sine', 0.2); }}
                               className="mt-4 px-6 py-2.5 bg-sky-600 text-white font-extrabold text-sm rounded-full shadow-lg shadow-sky-700/20 hover:scale-105 transition-transform flex items-center gap-2 mx-auto md:mx-0"
                             >
-                              🚀 Tulis Cerita Pertamaku Hari Ini!
+                              🚀 Tulis Ceritaku Hari Ini!
                             </button>
                           </div>
                         </div>
@@ -1233,35 +1506,40 @@ export default function App() {
                               </div>
                               <div className="bg-yellow-100/70 border border-yellow-200 rounded-2xl p-3.5 mt-4 max-w-xs relative">
                                 <p className="text-xs font-bold text-yellow-800 leading-relaxed">
-                                  "Hai! Aku <strong>Giga</strong>. Kejadian seru, membingungkan, atau menyedihkan apa yang kamu alami hari ini? Tuliskan di kotak atau klik perekam suara ya!"
+                                  "Hai <strong>{selectedStudent.name}</strong>! Aku <strong>Giga</strong>. Ceritakan peristiwa atau kejadian berkesan yang pernah kamu alami <strong>selama 1 bulan kebelakang ini</strong> (di sekolah, rumah, bersama teman, atau keluarga). Tulis atau pakai perekam suara ya!"
                                 </p>
                               </div>
                             </div>
 
                             <div className="md:w-2/3 w-full flex flex-col gap-4">
                               <div className="flex flex-col gap-1">
-                                <label className="text-xs font-bold text-slate-600">Kejadian Hari Ini (Tulis di sini):</label>
+                                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                                  <span>📅 Cerita Peristiwa (1 Bulan Kebelakang):</span>
+                                  <span className="text-[10px] text-sky-600 font-semibold">Tulis sendiri atau rekam suara</span>
+                                </label>
                                 <textarea
                                   value={factText}
                                   onChange={(e) => setFactText(e.target.value)}
-                                  placeholder="Contoh: Tadi siang aku senang sekali mendapat nilai bagus di tugas IPA, tapi sorenya aku kesal karena sepedaku bannya bocor..."
+                                  placeholder="Contoh: Dalam 1 bulan kebelakang ini, aku senang sekali saat kelompok IPA kami dipuji guru. Tapi dua minggu lalu aku sempat merasa sedih karena sepedaku bannya bocor saat mau berangkat sekolah..."
                                   className="w-full h-32 p-4 text-sm border-2 border-slate-200 rounded-2xl focus:border-sky-500 focus:outline-none transition-all leading-relaxed"
                                 />
                               </div>
 
-                              {/* Voice Recorder Block */}
-                              <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl">
-                                <div className="flex items-center justify-between mb-3">
+                              {/* Voice Recorder Block (Available on Every Step) */}
+                              <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                                <div className="flex items-center justify-between mb-2">
                                   <div className="flex items-center gap-2">
                                     <span className="p-1.5 bg-sky-100 rounded-lg text-sky-600">
                                       <Mic className="w-4 h-4" />
                                     </span>
-                                    <span className="text-xs font-bold text-slate-700">Atau Gunakan Perekam Suara:</span>
+                                    <span className="text-xs font-bold text-slate-700">
+                                      🎙️ Malas Mengetik? Rekam Suaramu di Sini:
+                                    </span>
                                   </div>
                                   {isRecording && (
-                                    <span className="text-xs font-extrabold text-sky-600 animate-pulse flex items-center gap-1.5">
-                                      <span className="w-2.5 h-2.5 bg-sky-600 rounded-full"></span>
-                                      Perekam Aktif: {Math.floor(recordingSeconds / 60)}:{(recordingSeconds % 60).toString().padStart(2, '0')}
+                                    <span className="text-xs font-extrabold text-rose-600 animate-pulse flex items-center gap-1.5">
+                                      <span className="w-2.5 h-2.5 bg-rose-600 rounded-full animate-ping"></span>
+                                      Merekam: {Math.floor(recordingSeconds / 60)}:{(recordingSeconds % 60).toString().padStart(2, '0')}
                                     </span>
                                   )}
                                 </div>
@@ -1271,23 +1549,23 @@ export default function App() {
                                     <button
                                       type="button"
                                       onClick={startRecording}
-                                      className="flex items-center gap-1.5 px-4 py-2.5 bg-sky-500 text-white font-extrabold text-xs rounded-xl shadow-md hover:bg-sky-400 active:scale-95 transition-all"
+                                      className="flex items-center gap-1.5 px-4 py-2 bg-rose-500 text-white font-extrabold text-xs rounded-xl shadow-md hover:bg-rose-400 active:scale-95 transition-all"
                                     >
-                                      🎤 Mulai Rekam
+                                      🎤 Mulai Rekam Suara
                                     </button>
                                   ) : (
                                     <>
                                       <button
                                         type="button"
                                         onClick={stopRecording}
-                                        className="flex items-center gap-1.5 px-4 py-2.5 bg-slate-800 text-white font-extrabold text-xs rounded-xl shadow-md hover:bg-slate-700 active:scale-95 transition-all"
+                                        className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 text-white font-extrabold text-xs rounded-xl shadow-md hover:bg-slate-700 active:scale-95 transition-all"
                                       >
                                         <Square className="w-4 h-4" /> Selesai & Simpan
                                       </button>
                                       <button
                                         type="button"
                                         onClick={cancelRecording}
-                                        className="px-3 py-2.5 border border-slate-300 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-100 transition-colors"
+                                        className="px-3 py-2 border border-slate-300 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-100 transition-colors"
                                       >
                                         Batal
                                       </button>
@@ -1295,16 +1573,16 @@ export default function App() {
                                   )}
 
                                   {recordedAudio && !isRecording && (
-                                    <div className="flex-1 flex items-center justify-between bg-white border border-sky-100 p-2 rounded-xl">
+                                    <div className="flex-1 flex items-center justify-between bg-white border border-sky-200 p-2 rounded-xl shadow-sm">
                                       <span className="text-xs font-bold text-sky-700 flex items-center gap-1">
                                         📻 Rekaman Suaramu Siap!
                                       </span>
                                       <button
                                         type="button"
                                         onClick={() => handlePlayAudio('review', recordedAudio)}
-                                        className="p-1.5 bg-sky-50 rounded-lg text-sky-600 hover:bg-sky-100 transition-colors"
+                                        className="p-1.5 bg-sky-50 rounded-lg text-sky-600 hover:bg-sky-100 transition-colors font-bold text-xs flex items-center gap-1"
                                       >
-                                        {playingId === 'review' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                                        {playingId === 'review' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />} Putar
                                       </button>
                                     </div>
                                   )}
@@ -1316,8 +1594,11 @@ export default function App() {
 
                         {/* STEP 2: FEELING */}
                         {step === 2 && (
-                          <div className="flex flex-col gap-6 animate-fade-in items-center w-full">
-                            <h4 className="text-center text-sm font-bold text-slate-600">Ketuk Karakter yang mewakili perasaanmu hari ini:</h4>
+                          <div className="flex flex-col gap-5 animate-fade-in w-full">
+                            <div className="text-center">
+                              <h4 className="text-sm font-bold text-slate-800">1. Ketuk Karakter Emosi yang Mewakili Perasaanmu:</h4>
+                              <p className="text-xs text-slate-500 mt-0.5">Pilih karakter yang paling cocok dengan hatimu saat peristiwa tersebut terjadi.</p>
+                            </div>
                             
                             {/* Grid of Characters */}
                             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 w-full">
@@ -1333,7 +1614,7 @@ export default function App() {
                                     }}
                                     className={`p-3 rounded-2xl border-2 transition-all flex flex-col items-center text-center gap-2 relative ${isSelected ? `border-slate-800 ring-4 ring-sky-500/20 bg-white` : `border-slate-200 bg-slate-50/50 hover:bg-slate-50`}`}
                                   >
-                                    <div className="w-20 h-20 flex items-center justify-center">
+                                    <div className="w-16 h-16 flex items-center justify-center">
                                       {char.svg}
                                     </div>
                                     <div>
@@ -1341,23 +1622,76 @@ export default function App() {
                                       <p className={`text-[10px] font-bold ${char.textColor}`}>{char.emotion}</p>
                                     </div>
                                     {isSelected && (
-                                      <span className="absolute top-2 right-2 bg-sky-500 text-white p-0.5 rounded-full text-[10px] w-4 h-4 flex items-center justify-center">✓</span>
+                                      <span className="absolute top-2 right-2 bg-sky-500 text-white p-0.5 rounded-full text-[10px] w-4 h-4 flex items-center justify-center font-bold">✓</span>
                                     )}
                                   </button>
                                 );
                               })}
                             </div>
 
-                            {/* Dialogue bubble for active character */}
-                            <div className={`w-full max-w-2xl border-2 ${currentCharacter.borderColor} ${currentCharacter.bgColor} rounded-2xl p-4 flex flex-col sm:flex-row items-center gap-4 mt-2 shadow-sm`}>
-                              <div className="shrink-0 w-16 h-16 flex items-center justify-center bg-white rounded-full p-1 shadow-sm">
-                                {React.cloneElement(currentCharacter.svg, { className: 'w-12 h-12' })}
+                            {/* Alasan Memilih Karakter */}
+                            <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl flex flex-col gap-3">
+                              <div className="flex flex-col gap-1">
+                                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                                  <span>💬 2. Kenapa kamu memilih karakter {currentCharacter.name.split(' ')[0]} ({selectedFeeling})?</span>
+                                </label>
+                                <textarea
+                                  value={feelingReasonText}
+                                  onChange={(e) => setFeelingReasonText(e.target.value)}
+                                  placeholder={`Ceritakan alasan kenapa kamu merasa ${selectedFeeling}... (misal: 'Aku memilih ${currentCharacter.name.split(' ')[0]} karena waktu itu temanku tidak mau berbagi mainan, jadi aku merasa kesal.')`}
+                                  className="w-full h-24 p-3 text-xs border border-slate-200 rounded-xl focus:border-sky-500 focus:outline-none leading-relaxed bg-white"
+                                />
                               </div>
-                              <div className="text-center sm:text-left">
-                                <p className="text-xs font-bold text-slate-800">Pesan dari {currentCharacter.name.split(' ')[0]}:</p>
-                                <p className={`text-xs font-medium italic mt-1 leading-relaxed ${currentCharacter.textColor}`}>
-                                  "{currentCharacter.quote}"
-                                </p>
+
+                              {/* Quick chips for feeling reasons */}
+                              <div>
+                                <p className="text-[10px] font-bold text-slate-500 mb-1">💡 Pilihan Alasan Cepat (Klik untuk menambah):</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {[
+                                    'Karena aku dipuji oleh guru dan orang tua.',
+                                    'Karena barang kesayanganku tidak sengaja rusak.',
+                                    'Karena aku belum paham pelajaran dan merasa cemas.',
+                                    'Karena temanku mengajak bermain bersama dengan ramah.',
+                                    'Karena aku berhasil menyelesaikan tugas dengan baik.'
+                                  ].map((chip) => (
+                                    <button
+                                      key={chip}
+                                      type="button"
+                                      onClick={() => {
+                                        setFeelingReasonText(prev => prev ? prev + ' ' + chip : chip);
+                                        playTone(440, 'sine', 0.05);
+                                      }}
+                                      className="px-2 py-1 bg-white hover:bg-sky-50 hover:text-sky-700 text-slate-600 border border-slate-200 hover:border-sky-300 rounded-lg text-[10px] font-bold transition-all"
+                                    >
+                                      + {chip}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Voice Recorder Block for Feeling */}
+                              <div className="bg-white border border-slate-200 p-3 rounded-xl flex items-center justify-between gap-3">
+                                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                                  <Mic className="w-4 h-4 text-sky-500" />
+                                  <span>Atau gunakan rekaman suara jika malas mengetik alasan:</span>
+                                </span>
+                                {!isRecording ? (
+                                  <button
+                                    type="button"
+                                    onClick={startRecording}
+                                    className="px-3 py-1.5 bg-rose-500 text-white font-extrabold text-[11px] rounded-lg shadow-sm hover:bg-rose-400 active:scale-95 transition-all flex items-center gap-1"
+                                  >
+                                    🎤 Rekam Alasan
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={stopRecording}
+                                    className="px-3 py-1.5 bg-slate-800 text-white font-extrabold text-[11px] rounded-lg shadow-sm hover:bg-slate-700 transition-all flex items-center gap-1"
+                                  >
+                                    <Square className="w-3.5 h-3.5" /> Selesai
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1372,32 +1706,31 @@ export default function App() {
                               </div>
                               <div className={`border rounded-2xl p-3.5 mt-4 max-w-xs relative ${currentCharacter.borderColor} ${currentCharacter.bgColor}`}>
                                 <p className={`text-xs font-bold leading-relaxed ${currentCharacter.textColor}`}>
-                                  "Hebat! Kita sudah tahu kejadian dan perasaanmu. Sekarang, mari cari <strong>Pembelajaran</strong> atau sisi baik yang didapat dari peristiwa tadi!"
+                                  "Hebat <strong>{selectedStudent.name}</strong>! Sekarang dari peristiwa tadi, mari cari <strong>Pembelajaran</strong> atau hal baik yang dapat diambil agar kamu semakin bijak!"
                                 </p>
                               </div>
                             </div>
 
                             <div className="md:w-2/3 w-full flex flex-col gap-4">
                               <div className="flex flex-col gap-1">
-                                <label className="text-xs font-bold text-slate-600">Pelajaran Berharga Hari Ini (Tulis di sini):</label>
+                                <label className="text-xs font-bold text-slate-700">Pelajaran Berharga yang Didapat (Tulis secara leluasa):</label>
                                 <textarea
                                   value={findingText}
                                   onChange={(e) => setFindingText(e.target.value)}
-                                  placeholder="Contoh: Aku jadi tahu kalau tidak paham matematika harus berani angkat tangan dan bertanya. Atau, aku sadar merebut mainan itu membuat temanku sedih..."
-                                  className="w-full h-32 p-4 text-sm border-2 border-slate-200 rounded-2xl focus:border-rose-500 focus:outline-none transition-all leading-relaxed"
+                                  placeholder="Contoh: Aku jadi belajar bahwa jika belum mengerti pelajaran, aku harus berani angkat tangan dan bertanya. Atau, aku belajar bahwa mengalah dan berbagi membuat hati lebih tenang..."
+                                  className="w-full h-28 p-3.5 text-sm border-2 border-slate-200 rounded-2xl focus:border-rose-500 focus:outline-none transition-all leading-relaxed"
                                 />
                               </div>
 
                               <div>
-                                <p className="text-[10px] font-bold text-slate-500 mb-1.5">💡 Ketuk Ide Pembelajaran Cepat:</p>
+                                <p className="text-[10px] font-bold text-slate-500 mb-1.5">💡 Pemantik Ide Pembelajaran (Ketuk untuk menambah ide):</p>
                                 <div className="flex flex-wrap gap-1.5">
                                   {[
-                                    'Aku belajar harus lebih sabar mengantre.',
-                                    'Aku belajar bahwa jujur itu melegakan hati.',
-                                    'Aku perlu berlatih lebih giat lagi.',
-                                    'Aku tahu bahwa berbagi itu menyenangkan.',
-                                    'Aku menyadari semua makhluk hidup pasti berpisah.',
-                                    'Aku bersyukur mempunyai orang tua yang sayang padaku.'
+                                    'Aku belajar harus lebih sabar dan tidak terburu-buru.',
+                                    'Aku belajar bahwa berkata jujur itu membuat lega.',
+                                    'Aku perlu berlatih dan belajar lebih giat lagi.',
+                                    'Aku tahu bahwa berbagi dan membantu teman itu menyenangkan.',
+                                    'Aku bersyukur mempunyai orang tua dan guru yang selalu mendukungku.'
                                   ].map((chip) => (
                                     <button
                                       key={chip}
@@ -1413,60 +1746,189 @@ export default function App() {
                                   ))}
                                 </div>
                               </div>
+
+                              {/* Voice Recorder Block for Finding */}
+                              <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                                    <Mic className="w-4 h-4 text-sky-500" />
+                                    <span>🎙️ Malas Mengetik? Ceritakan Pembelajaranmu lewat Suara:</span>
+                                  </span>
+                                  {!isRecording ? (
+                                    <button
+                                      type="button"
+                                      onClick={startRecording}
+                                      className="px-3.5 py-1.5 bg-rose-500 text-white font-extrabold text-xs rounded-xl shadow-md hover:bg-rose-400 transition-all flex items-center gap-1"
+                                    >
+                                      🎤 Rekam Suara
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={stopRecording}
+                                      className="px-3.5 py-1.5 bg-slate-800 text-white font-extrabold text-xs rounded-xl shadow-md hover:bg-slate-700 transition-all flex items-center gap-1"
+                                    >
+                                      <Square className="w-3.5 h-3.5" /> Selesai
+                                    </button>
+                                  )}
+                                </div>
+                                {recordedAudio && !isRecording && (
+                                  <div className="text-[11px] font-bold text-sky-700 flex items-center justify-between bg-white p-2 rounded-xl border border-sky-100">
+                                    <span>📻 Rekaman Suaramu Siap Terkirim!</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handlePlayAudio('review', recordedAudio)}
+                                      className="text-sky-600 hover:underline font-bold"
+                                    >
+                                      {playingId === 'review' ? 'Jeda' : 'Putar'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         )}
 
                         {/* STEP 4: FUTURE */}
                         {step === 4 && (
-                          <div className="flex flex-col md:flex-row gap-6 items-center flex-1 animate-fade-in">
-                            <div className="md:w-1/3 flex flex-col items-center text-center">
-                              <div className={`p-4 rounded-3xl shadow-md border-2 ${currentCharacter.borderColor} ${currentCharacter.bgColor}`}>
-                                {React.cloneElement(currentCharacter.svg, { className: 'w-24 h-24' })}
-                              </div>
-                              <div className={`border rounded-2xl p-3.5 mt-4 max-w-xs relative ${currentCharacter.borderColor} ${currentCharacter.bgColor}`}>
-                                <p className={`text-xs font-bold leading-relaxed ${currentCharacter.textColor}`}>
-                                  "Langkah terakhir, teman cerdas! Apa <strong>Rencana Tindak Lanjut</strong> atau langkah seru yang akan kamu lakukan besok/selanjutnya?"
-                                </p>
+                          <div className="flex flex-col gap-5 animate-fade-in w-full">
+                            <div className="flex items-center gap-3">
+                              <span className="p-2 bg-sky-100 rounded-xl text-sky-600 text-xl">🚀</span>
+                              <div>
+                                <h4 className="text-sm font-extrabold text-slate-800">1. Pilih Tema / Topik Rencana Masa Depanmu:</h4>
+                                <p className="text-xs text-slate-500">Pilih tema di bawah untuk memunculkan referensi ide jawaban yang bisa kamu gunakan!</p>
                               </div>
                             </div>
 
-                             <div className="md:w-2/3 w-full flex flex-col gap-4">
-                              <div className="flex flex-col gap-1">
-                                <label className="text-xs font-bold text-slate-600">Rencanaku Selanjutnya (Tulis di sini):</label>
-                                <textarea
-                                  value={futureText}
-                                  onChange={(e) => setFutureText(e.target.value)}
-                                  placeholder="Contoh: Besok aku mau minta maaf ke Andi, atau malam ini aku mau belajar perkalian desimal bersama Kakak..."
-                                  className="w-full h-32 p-4 text-sm border-2 border-slate-200 rounded-2xl focus:border-sky-500 focus:outline-none transition-all leading-relaxed"
-                                />
-                              </div>
+                            {/* Theme/Topic selector buttons */}
+                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                              {[
+                                { id: 'Sekolah', label: '🏫 Sekolah', color: 'bg-sky-50 text-sky-700 border-sky-200' },
+                                { id: 'Rumah', label: '🏠 Rumah / Keluarga', color: 'bg-amber-50 text-amber-700 border-amber-200' },
+                                { id: 'Teman', label: '👥 Teman', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+                                { id: 'Hobi', label: '⚽ Hobi / Olahraga', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                                { id: 'Cita-Cita', label: '📖 Belajar & Cita-Cita', color: 'bg-rose-50 text-rose-700 border-rose-200' },
+                              ].map((topic) => {
+                                const isSelected = futureTopic === topic.id;
+                                return (
+                                  <button
+                                    key={topic.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setFutureTopic(topic.id as any);
+                                      playTone(480, 'sine', 0.05);
+                                    }}
+                                    className={`px-3 py-2 rounded-xl text-xs font-extrabold border transition-all text-center ${isSelected ? 'bg-sky-500 text-white border-sky-500 shadow-md ring-2 ring-sky-300' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`}
+                                  >
+                                    {topic.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
 
-                              <div>
-                                <p className="text-[10px] font-bold text-slate-500 mb-1.5">🚀 Ketuk Ide Rencana Cepat:</p>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {[
-                                    'Besok aku akan meminta maaf kepada temanku.',
-                                    'Malam ini aku mau tidur lebih cepat agar tidak kesiangan.',
-                                    'Aku akan belajar kembali bersama Ibu malam ini.',
-                                    'Aku mau mengajak temanku bermain lego bersama besok.',
-                                    'Aku akan mendoakan kucing kesayanganku setiap malam.',
-                                    'Aku ingin berbicara santai dengan Ibu guru besok pagi.'
-                                  ].map((chip) => (
-                                    <button
-                                      key={chip}
-                                      type="button"
-                                      onClick={() => {
-                                        setFutureText(prev => prev ? prev + ' ' + chip : chip);
-                                        playTone(440, 'sine', 0.05);
-                                      }}
-                                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-sky-50 hover:text-sky-600 text-slate-600 border border-slate-200 hover:border-sky-300 rounded-lg text-[10px] font-bold transition-all"
-                                    >
-                                      + {chip}
-                                    </button>
-                                  ))}
-                                </div>
+                            {/* Dynamic Topic References */}
+                            <div className="bg-sky-50/60 border border-sky-200 p-3.5 rounded-2xl">
+                              <p className="text-xs font-bold text-sky-900 mb-2 flex items-center gap-1">
+                                💡 Referensi Jawaban Rencana (Tema: {futureTopic}) — Ketuk untuk memasukkan:
+                              </p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                                {(( {
+                                  Sekolah: [
+                                    'Besok aku akan lebih berani bertanya kepada Guru jika belum paham.',
+                                    'Aku mau datang lebih pagi ke sekolah agar tidak terburu-buru.',
+                                    'Malam ini aku mau menyiapkan buku pelajaran besok sesuai jadwal.',
+                                    'Aku akan mendengarkan penjelasan guru di kelas dengan tekun.'
+                                  ],
+                                  Rumah: [
+                                    'Sore nanti aku mau merapikan kamar dan tempat tidurku sendiri.',
+                                    'Aku akan membantu Ibu merapikan piring setelah makan bersama.',
+                                    'Malam ini aku mau mengurangi main game dan mengobrol dengan Ayah/Ibu.',
+                                    'Aku ingin menyayangi dan tidak bertengkar lagi dengan adik/kakak.'
+                                  ],
+                                  Teman: [
+                                    'Besok aku akan meminta maaf kepada temanku atas kejadian kemarin.',
+                                    'Aku mau mengajak teman yang sedang sendiri untuk bermain bersama.',
+                                    'Aku akan berbagi bekal makanan dengan temanku saat jam istirahat.',
+                                    'Aku berjanji akan mendengarkan saat teman sedang berbicara.'
+                                  ],
+                                  Hobi: [
+                                    'Aku akan berlatih olahraga/hobi kesayanganku dengan lebih giat.',
+                                    'Aku mau menyelesaikan gambar dan mewarnai karya ceritaku.',
+                                    'Aku ingin belajar hal baru dari buku atau video edukasi.',
+                                    'Aku akan rajin membaca buku cerita 15 menit setiap hari.'
+                                  ],
+                                  'Cita-Cita': [
+                                    'Aku mau rajin belajar dan berlatih agar cita-citaku terwujud.',
+                                    'Aku akan selalu berdoa dan berusaha melakukan yang terbaik.',
+                                    'Aku mau menjaga kesehatan tubuh dengan rajin berolahraga.',
+                                    'Aku ingin menjadi anak yang membanggakan orang tua dan guru.'
+                                  ]
+                                } as Record<string, string[]>)[futureTopic] || []).map((suggestion, idx) => (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => {
+                                      setFutureText(prev => prev ? prev + ' ' + suggestion : suggestion);
+                                      playTone(523, 'sine', 0.05);
+                                    }}
+                                    className="p-2 bg-white hover:bg-sky-100 text-sky-900 border border-sky-200 rounded-xl text-left text-[11px] font-semibold transition-all hover:shadow-sm"
+                                  >
+                                    + {suggestion}
+                                  </button>
+                                ))}
                               </div>
+                            </div>
+
+                            {/* Text Area for Future Text */}
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs font-bold text-slate-800">
+                                ✍️ Atau Tuliskan Rencana Terbaikmu Sendiri:
+                              </label>
+                              <textarea
+                                value={futureText}
+                                onChange={(e) => setFutureText(e.target.value)}
+                                placeholder="Contoh: Rencanaku besok, aku mau bangun lebih pagi, menyapa teman-temanku di kelas dengan senyuman, dan mendoakan kebaikan untuk keluargaku..."
+                                className="w-full h-24 p-3.5 text-sm border-2 border-slate-200 rounded-2xl focus:border-sky-500 focus:outline-none transition-all leading-relaxed"
+                              />
+                            </div>
+
+                            {/* Voice Recorder Block for Future */}
+                            <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                                  <Mic className="w-4 h-4 text-rose-500" />
+                                  <span>🎙️ Malas Mengetik? Ceritakan Rencanamu lewat Suara:</span>
+                                </span>
+                                {!isRecording ? (
+                                  <button
+                                    type="button"
+                                    onClick={startRecording}
+                                    className="px-3.5 py-1.5 bg-rose-500 text-white font-extrabold text-xs rounded-xl shadow-md hover:bg-rose-400 transition-all flex items-center gap-1"
+                                  >
+                                    🎤 Rekam Suara
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={stopRecording}
+                                    className="px-3.5 py-1.5 bg-slate-800 text-white font-extrabold text-xs rounded-xl shadow-md hover:bg-slate-700 transition-all flex items-center gap-1"
+                                  >
+                                    <Square className="w-3.5 h-3.5" /> Selesai
+                                  </button>
+                                )}
+                              </div>
+                              {recordedAudio && !isRecording && (
+                                <div className="text-[11px] font-bold text-sky-700 flex items-center justify-between bg-white p-2 rounded-xl border border-sky-100">
+                                  <span>📻 Rekaman Suaramu Siap Terkirim!</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePlayAudio('review', recordedAudio)}
+                                    className="text-sky-600 hover:underline font-bold"
+                                  >
+                                    {playingId === 'review' ? 'Jeda' : 'Putar'}
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         )}
@@ -1531,7 +1993,7 @@ export default function App() {
                             </div>
                             <h3 className="text-xl font-extrabold text-sky-600 mb-2">Hebat Sekali, {selectedStudent.name}!</h3>
                             <p className="text-sm text-slate-600 max-w-md leading-relaxed mb-6">
-                              Cerita indahmu sudah terkirim ke <strong>Ibu/Bapak Guru Wali Kelas</strong>. Kamu berani mengekspresikan hatimu, itu tanda anak pintar!
+                              Cerita indahmu sudah terkirim ke <strong>Ibu/Bapak Guru Wali</strong>. Kamu berani mengekspresikan hatimu, itu tanda anak pintar!
                             </p>
                             <div className="flex flex-col sm:flex-row gap-3">
                               <button
@@ -1567,7 +2029,7 @@ export default function App() {
                     <div className="flex flex-col gap-4 animate-fade-in">
                       <div className="flex items-center justify-between mb-2">
                         <h3 className="font-extrabold text-slate-800 text-base flex items-center gap-1.5">
-                          <span>📕</span> Buku Diary Digital Ceritaku
+                          <span>📕</span> Buku Diary Digital Ceritaku — {selectedStudent.name}
                         </h3>
                         <span className="text-xs text-slate-500 font-bold bg-white px-3 py-1 border border-slate-200 rounded-full">
                           Total: {studentStories.length} Cerita
@@ -1639,7 +2101,7 @@ export default function App() {
                                   {story.teacherResponse ? (
                                     <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
                                       <p className="text-[10px] font-extrabold text-amber-800 flex items-center gap-1">
-                                        👩‍🏫 Tanggapan Wali Kelas:
+                                        👩‍🏫 Tanggapan Guru Wali:
                                       </p>
                                       <p className="text-[10px] font-medium text-amber-700 italic mt-0.5 leading-normal">
                                         "{story.teacherResponse}"
@@ -1686,7 +2148,7 @@ export default function App() {
           <div className="max-w-md w-full mx-auto my-8 bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm flex flex-col gap-6 animate-fade-in">
             <div className="text-center flex flex-col gap-2">
               <span className="text-5xl mx-auto p-4 bg-sky-50 rounded-full w-20 h-20 flex items-center justify-center border border-sky-100">👩‍🏫</span>
-              <h3 className="text-xl font-extrabold text-slate-800">Ruang Guru Wali Kelas</h3>
+              <h3 className="text-xl font-extrabold text-slate-800">Ruang Guru Wali</h3>
               <p className="text-xs text-slate-500 font-medium">
                 {authMode === 'login' 
                   ? 'Masuk dengan email Anda untuk mengelola bimbingan & jurnal emosi siswa.' 
@@ -1974,6 +2436,22 @@ export default function App() {
                   </div>
                 </div>
 
+                <button
+                  type="button"
+                  onClick={() => {
+                    const filtered = teacherStories.filter(s => filterStatus === 'Semua' || s.status === filterStatus);
+                    handlePrintReport(
+                      'class_summary',
+                      undefined,
+                      filtered,
+                      `LAPORAN REKAPITULASI JURNAL EMOSI KELAS (${currentTeacher ? currentTeacher.class : 'GURU WALI'})`
+                    );
+                  }}
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all self-end sm:self-center"
+                >
+                  <Printer className="w-3.5 h-3.5" /> Cetak Rekap Kelas
+                </button>
+
                 <div className="flex items-center gap-2 self-start sm:self-center">
                   <span className="text-xs font-bold text-slate-500">Filter Risiko:</span>
                   <div className="flex gap-1">
@@ -2068,7 +2546,22 @@ export default function App() {
                               }}
                               className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-colors"
                             >
-                              <MessageCircle className="w-4 h-4" /> Berikan Dukungan
+                              💬 Beri Tanggapan
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handlePrintReport(
+                                  'single_story',
+                                  story,
+                                  undefined,
+                                  `LAPORAN INDIVIDUAL JURNAL EMOSI SISWA - ${story.studentName}`
+                                );
+                              }}
+                              className="w-full px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-colors"
+                            >
+                              <Printer className="w-3.5 h-3.5" /> Cetak Laporan PDF
                             </button>
                             {story.analysis?.tingkat_risiko === 'Tinggi' && (
                               <div className="bg-rose-100 border border-rose-200 text-rose-800 p-2.5 rounded-xl text-[10px] leading-relaxed max-w-[180px]">
@@ -2266,12 +2759,29 @@ export default function App() {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={handleBkOrtuLogout}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 transition-colors whitespace-nowrap self-stretch md:self-auto text-center"
-              >
-                Keluar Portal 🚪
-              </button>
+              <div className="flex items-center gap-2 self-stretch md:self-auto justify-between">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const escalatedList = stories.filter(s => s.escalated);
+                    handlePrintReport(
+                      'class_summary',
+                      undefined,
+                      escalatedList,
+                      'LAPORAN REKAPITULASI RUJUKAN & INTERVENSI BIMBINGAN KONSELING (BK)'
+                    );
+                  }}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all"
+                >
+                  <Printer className="w-4 h-4" /> Cetak Rekap Kasus BK
+                </button>
+                <button
+                  onClick={handleBkOrtuLogout}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 transition-colors whitespace-nowrap text-center"
+                >
+                  Keluar Portal 🚪
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -2356,13 +2866,26 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-500">Status Kasus:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handlePrintReport(
+                            'counseling_report',
+                            activeStoryDetail,
+                            undefined,
+                            `LAPORAN INTERVENSI KONSELING (BK) - ${activeStoryDetail.studentName}`
+                          );
+                        }}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all"
+                      >
+                        <Printer className="w-3.5 h-3.5" /> Cetak Rujukan BK PDF
+                      </button>
                       <select
                         value={activeStoryDetail.status}
                         onChange={(e) => {
                           if (e.target.value === 'Teratasi') handleResolveStory(activeStoryDetail.id);
                         }}
-                        className="border border-slate-200 rounded-lg text-xs font-bold p-1 bg-white focus:outline-none"
+                        className="border border-slate-200 rounded-lg text-xs font-bold p-1.5 bg-white focus:outline-none"
                       >
                         <option value="Butuh Bantuan">Butuh Bantuan Aktif</option>
                         <option value="Teratasi">Selesai / Teratasi</option>
@@ -2647,36 +3170,122 @@ export default function App() {
                     </div>
 
                     <div className="flex flex-col gap-1.5">
-                      <label className="font-bold text-slate-700">Penugasan Kelas / Peran:</label>
-                      <select
-                        value={adminNewTeacherClass}
-                        onChange={(e) => setAdminNewTeacherClass(e.target.value)}
-                        className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white font-bold text-slate-700 focus:outline-none focus:border-rose-500"
-                      >
-                        <optgroup label="Wali Kelas VII">
-                          <option value="Kelas VII A">Wali Kelas VII A</option>
-                          <option value="Kelas VII B">Wali Kelas VII B</option>
-                          <option value="Kelas VII C">Wali Kelas VII C</option>
-                          <option value="Kelas VII D">Wali Kelas VII D</option>
-                          <option value="Kelas VII E">Wali Kelas VII E</option>
-                        </optgroup>
-                        <optgroup label="Wali Kelas VIII">
-                          <option value="Kelas VIII A">Wali Kelas VIII A</option>
-                          <option value="Kelas VIII B">Wali Kelas VIII B</option>
-                          <option value="Kelas VIII C">Wali Kelas VIII C</option>
-                          <option value="Kelas VIII D">Wali Kelas VIII D</option>
-                          <option value="Kelas VIII E">Wali Kelas VIII E</option>
-                        </optgroup>
-                        <optgroup label="Wali Kelas IX">
-                          <option value="Kelas IX A">Wali Kelas IX A</option>
-                          <option value="Kelas IX B">Wali Kelas IX B</option>
-                          <option value="Kelas IX C">Wali Kelas IX C</option>
-                          <option value="Kelas IX D">Wali Kelas IX D</option>
-                          <option value="Kelas IX E">Wali Kelas IX E</option>
-                        </optgroup>
-                        <option value="Guru BK (Konselor)">Guru Bimbingan Konseling (BK)</option>
-                        <option value="Umum">Guru Mata Pelajaran / Umum</option>
-                      </select>
+                      <div className="flex items-center justify-between">
+                        <label className="font-bold text-slate-700">Pilihan Kelas yang Diampu (Bisa Pilih Lebih dari 1 Kelas):</label>
+                        <span className="text-[10px] font-extrabold bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full">
+                          {adminNewTeacherClasses.length} Kelas Terpilih
+                        </span>
+                      </div>
+                      
+                      <div className="p-3 bg-slate-50 border-2 border-slate-200 rounded-2xl flex flex-col gap-2.5 max-h-[220px] overflow-y-auto">
+                        {/* Kelas VII Group */}
+                        <div>
+                          <p className="text-[10px] font-extrabold text-slate-500 uppercase mb-1">Kelas VII (Tujuh):</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {['Kelas VII A', 'Kelas VII B', 'Kelas VII C', 'Kelas VII D', 'Kelas VII E'].map((cls) => {
+                              const isSelected = adminNewTeacherClasses.includes(cls);
+                              return (
+                                <button
+                                  key={cls}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setAdminNewTeacherClasses(prev => prev.filter(c => c !== cls));
+                                    } else {
+                                      setAdminNewTeacherClasses(prev => [...prev, cls]);
+                                    }
+                                    playTone(400, 'sine', 0.05);
+                                  }}
+                                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all ${isSelected ? 'bg-rose-600 text-white border-rose-600 shadow-sm' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'}`}
+                                >
+                                  {isSelected ? '✓ ' : '+ '}{cls}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Kelas VIII Group */}
+                        <div>
+                          <p className="text-[10px] font-extrabold text-slate-500 uppercase mb-1">Kelas VIII (Delapan):</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {['Kelas VIII A', 'Kelas VIII B', 'Kelas VIII C', 'Kelas VIII D', 'Kelas VIII E'].map((cls) => {
+                              const isSelected = adminNewTeacherClasses.includes(cls);
+                              return (
+                                <button
+                                  key={cls}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setAdminNewTeacherClasses(prev => prev.filter(c => c !== cls));
+                                    } else {
+                                      setAdminNewTeacherClasses(prev => [...prev, cls]);
+                                    }
+                                    playTone(400, 'sine', 0.05);
+                                  }}
+                                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all ${isSelected ? 'bg-rose-600 text-white border-rose-600 shadow-sm' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'}`}
+                                >
+                                  {isSelected ? '✓ ' : '+ '}{cls}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Kelas IX Group */}
+                        <div>
+                          <p className="text-[10px] font-extrabold text-slate-500 uppercase mb-1">Kelas IX (Sembilan):</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {['Kelas IX A', 'Kelas IX B', 'Kelas IX C', 'Kelas IX D', 'Kelas IX E'].map((cls) => {
+                              const isSelected = adminNewTeacherClasses.includes(cls);
+                              return (
+                                <button
+                                  key={cls}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setAdminNewTeacherClasses(prev => prev.filter(c => c !== cls));
+                                    } else {
+                                      setAdminNewTeacherClasses(prev => [...prev, cls]);
+                                    }
+                                    playTone(400, 'sine', 0.05);
+                                  }}
+                                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all ${isSelected ? 'bg-rose-600 text-white border-rose-600 shadow-sm' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'}`}
+                                >
+                                  {isSelected ? '✓ ' : '+ '}{cls}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Kategori Khusus */}
+                        <div>
+                          <p className="text-[10px] font-extrabold text-slate-500 uppercase mb-1">Kategori Khusus:</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {['Guru Bimbingan Konseling (BK)', 'Umum / Lintas Kelas'].map((cls) => {
+                              const isSelected = adminNewTeacherClasses.includes(cls);
+                              return (
+                                <button
+                                  key={cls}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setAdminNewTeacherClasses(prev => prev.filter(c => c !== cls));
+                                    } else {
+                                      setAdminNewTeacherClasses(prev => [...prev, cls]);
+                                    }
+                                    playTone(400, 'sine', 0.05);
+                                  }}
+                                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all ${isSelected ? 'bg-rose-600 text-white border-rose-600 shadow-sm' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'}`}
+                                >
+                                  {isSelected ? '✓ ' : '+ '}{cls}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     <button
@@ -2727,7 +3336,15 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditTeacher(t)}
+                              title="Edit Data Akun Guru (Perbaiki Nama, Email, Password, atau Kelas)"
+                              className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-[11px] rounded-xl transition-colors border border-indigo-200 flex items-center gap-1 shadow-sm"
+                            >
+                              <Edit className="w-3.5 h-3.5 text-indigo-600" /> Edit Akun
+                            </button>
                             <button
                               onClick={() => handleAdminDeleteTeacher(t.id, t.name)}
                               title="Hapus akun guru"
@@ -2890,13 +3507,31 @@ export default function App() {
                               </div>
                             </div>
 
-                            <button
-                              onClick={() => handleDeleteStudent(st.id, st.name)}
-                              title="Hapus siswa"
-                              className="p-2 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors border border-transparent hover:border-rose-200"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditStudent(st)}
+                                title="Edit Profil Siswa (Perbaiki Nama, Kelas, Avatar, atau Guru Wali)"
+                                className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 font-extrabold text-[11px] rounded-xl transition-colors border border-sky-200 flex items-center gap-1 shadow-sm"
+                              >
+                                <Edit className="w-3.5 h-3.5 text-sky-600" /> Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleResetStudent(st.id, st.name)}
+                                title="Reset pendaftaran akun siswa agar dapat mendaftar kembali"
+                                className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-extrabold text-[11px] rounded-xl transition-colors border border-amber-200 flex items-center gap-1 shadow-sm"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5 text-amber-600" /> Reset Akun
+                              </button>
+                              <button
+                                onClick={() => handleDeleteStudent(st.id, st.name)}
+                                title="Hapus siswa dari database"
+                                className="p-2 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors border border-transparent hover:border-rose-200"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
                         );
                       })}
@@ -2965,8 +3600,43 @@ export default function App() {
       {/* FOOTER */}
       <footer className="mt-auto bg-slate-800 text-white border-t border-slate-700 py-6 px-4 md:px-8 text-center text-xs">
         <p className="font-bold">CERDAS © 2026 - Sistem Pendukung Keputusan Dukungan Emosional & Kesehatan Mental Anak</p>
-        <p className="text-slate-400 mt-1.5">Mendukung kolaborasi harmonis antara Murid, Wali Kelas, Guru BK, dan Orang Tua Sekolah.</p>
+        <p className="text-slate-400 mt-1.5">Mendukung kolaborasi harmonis antara Murid, Guru Wali, Guru BK, dan Orang Tua Sekolah.</p>
       </footer>
+
+      {/* MODAL: Role Switcher Lock when in Murid Mode */}
+      {showRoleUnlockModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 border border-slate-200 shadow-2xl animate-fade-in text-center flex flex-col gap-4">
+            <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center text-3xl mx-auto border border-amber-200">
+              🔒
+            </div>
+            <div>
+              <h3 className="font-extrabold text-lg text-slate-800">Ruang Khusus Guru / Pengampu</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Anak-anak hanya dapat mengakses <strong>Ruang Anak</strong> untuk menulis dan melihat buku ceritanya. Apakah Anda Guru Wali atau Guru BK yang ingin beralih halaman?
+              </p>
+            </div>
+            <div className="flex gap-2.5 pt-2">
+              <button
+                onClick={() => setShowRoleUnlockModal(null)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-colors"
+              >
+                Tetap di Ruang Anak
+              </button>
+              <button
+                onClick={() => {
+                  setRole(showRoleUnlockModal as any);
+                  setShowRoleUnlockModal(null);
+                  playTone(523, 'sine', 0.2);
+                }}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-md transition-colors"
+              >
+                Masuk Ruang Guru
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: Add student */}
       {showAddStudentModal && (
@@ -3117,6 +3787,379 @@ export default function App() {
         </div>
       )}
 
+      {/* PRINTABLE REPORT COMPONENT (Only visible during print) */}
+      <div id="printable-report" className="hidden print:block p-8 bg-white text-slate-900 font-sans">
+        {/* Header Kop Surat */}
+        <div className="border-b-4 border-slate-900 pb-4 mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-black uppercase tracking-wider text-slate-900">CERDAS - CERITA DIGITAL ANAK SEMPATIK</h1>
+            <p className="text-sm font-bold text-slate-600">Sistem Pendukung Keputusan Dukungan Emosional & Kesehatan Mental Siswa</p>
+            <p className="text-xs text-slate-500">Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi - SMP Negeri Sempatik</p>
+          </div>
+          <div className="text-right">
+            <span className="text-3xl font-black text-slate-800">SPK-CERDAS</span>
+            <p className="text-[10px] text-slate-400 font-mono mt-1">Ref: {new Date().toLocaleDateString('id-ID')}</p>
+          </div>
+        </div>
+
+        {/* Title */}
+        <div className="text-center my-6">
+          <h2 className="text-xl font-extrabold uppercase underline tracking-wide">{printableData?.title || 'LAPORAN REFLEKSI EMOSI'}</h2>
+          <p className="text-xs text-slate-500 mt-1">Tanggal Cetak: {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+        </div>
+
+        {/* Single Story Printout */}
+        {(printableData?.type === 'single_story' || printableData?.type === 'counseling_report') && printableData.story && (
+          <div className="flex flex-col gap-6 text-xs">
+            {/* Student Metadata */}
+            <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-300">
+              <div>
+                <p className="font-bold text-slate-500 uppercase text-[10px]">Nama Siswa:</p>
+                <p className="text-sm font-extrabold text-slate-900">{printableData.story.studentName}</p>
+              </div>
+              <div>
+                <p className="font-bold text-slate-500 uppercase text-[10px]">Guru Wali Pengampu:</p>
+                <p className="text-sm font-extrabold text-slate-900">{printableData.story.guruWali || 'Ibu Rahma, S.Pd'}</p>
+              </div>
+              <div>
+                <p className="font-bold text-slate-500 uppercase text-[10px]">Tanggal Refleksi:</p>
+                <p className="font-bold text-slate-800">{new Date(printableData.story.timestamp).toLocaleString('id-ID')}</p>
+              </div>
+              <div>
+                <p className="font-bold text-slate-500 uppercase text-[10px]">Perasaan & Karakter Emosi:</p>
+                <p className="font-bold text-slate-800">{printableData.story.feeling} (Karakter: {printableData.story.character || 'Giga'})</p>
+              </div>
+            </div>
+
+            {/* 4F Content Table */}
+            <table className="w-full border-collapse border border-slate-300 text-xs">
+              <thead>
+                <tr className="bg-slate-100 text-left">
+                  <th className="border border-slate-300 p-2.5 font-bold uppercase w-1/4">Elemen Refleksi 4F</th>
+                  <th className="border border-slate-300 p-2.5 font-bold uppercase">Detail Catatan Siswa</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="border border-slate-300 p-2.5 font-bold bg-slate-50">1. FACT (Kejadian)</td>
+                  <td className="border border-slate-300 p-2.5 leading-relaxed">{printableData.story.fact}</td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-300 p-2.5 font-bold bg-slate-50">2. FEELING (Perasaan)</td>
+                  <td className="border border-slate-300 p-2.5 leading-relaxed">{printableData.story.feeling}</td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-300 p-2.5 font-bold bg-slate-50">3. FINDING (Pembelajaran)</td>
+                  <td className="border border-slate-300 p-2.5 leading-relaxed">{printableData.story.finding}</td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-300 p-2.5 font-bold bg-slate-50">4. FUTURE (Rencana)</td>
+                  <td className="border border-slate-300 p-2.5 leading-relaxed">{printableData.story.future}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* Response Section */}
+            <div className="border border-slate-300 p-4 rounded-xl bg-slate-50 flex flex-col gap-3">
+              <div>
+                <p className="font-bold text-slate-700 uppercase text-[10px]">Tanggapan & Pendampingan Guru Wali:</p>
+                <p className="text-xs text-slate-800 italic mt-0.5">{printableData.story.guruNote || printableData.story.teacherResponse || 'Belum ada catatan tanggapan.'}</p>
+              </div>
+              {printableData.type === 'counseling_report' && (
+                <div>
+                  <p className="font-bold text-emerald-800 uppercase text-[10px]">Catatan Intervensi Bimbingan Konseling (BK):</p>
+                  <p className="text-xs text-emerald-900 italic mt-0.5">{printableData.story.counselorNote || 'Dalam penanganan sesi bimbingan.'}</p>
+                </div>
+              )}
+              {printableData.story.aiRecommendation && (
+                <div>
+                  <p className="font-bold text-sky-800 uppercase text-[10px]">Rekomendasi Keputusan AI (SPK Decision Support):</p>
+                  <p className="text-xs text-sky-900 italic mt-0.5">{printableData.story.aiRecommendation}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Class Summary Printout */}
+        {printableData?.type === 'class_summary' && printableData.storiesList && (
+          <div className="flex flex-col gap-4 text-xs">
+            <p className="font-bold text-slate-700">Total Refleksi Terdata: {printableData.storiesList.length} Jurnal</p>
+            <table className="w-full border-collapse border border-slate-300 text-[11px]">
+              <thead>
+                <tr className="bg-slate-100 text-left">
+                  <th className="border border-slate-300 p-2 font-bold">No</th>
+                  <th className="border border-slate-300 p-2 font-bold">Nama Siswa</th>
+                  <th className="border border-slate-300 p-2 font-bold">Tanggal</th>
+                  <th className="border border-slate-300 p-2 font-bold">Emosi</th>
+                  <th className="border border-slate-300 p-2 font-bold">Peristiwa (Fact)</th>
+                  <th className="border border-slate-300 p-2 font-bold">Rencana (Future)</th>
+                  <th className="border border-slate-300 p-2 font-bold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {printableData.storiesList.map((st, idx) => (
+                  <tr key={st.id || idx}>
+                    <td className="border border-slate-300 p-2 text-center">{idx + 1}</td>
+                    <td className="border border-slate-300 p-2 font-bold">{st.studentName}</td>
+                    <td className="border border-slate-300 p-2 whitespace-nowrap">{new Date(st.timestamp).toLocaleDateString('id-ID')}</td>
+                    <td className="border border-slate-300 p-2 font-bold">{st.feeling}</td>
+                    <td className="border border-slate-300 p-2 leading-tight">{st.fact}</td>
+                    <td className="border border-slate-300 p-2 leading-tight">{st.future}</td>
+                    <td className="border border-slate-300 p-2 font-bold">{st.status || 'Aktif'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Signatures */}
+        <div className="grid grid-cols-2 gap-8 mt-12 pt-6 text-center text-xs">
+          <div>
+            <p className="font-bold text-slate-600">Mengetahui,</p>
+            <p className="font-extrabold text-slate-800 mt-1">Guru Wali Kelas</p>
+            <div className="h-16"></div>
+            <p className="font-bold underline text-slate-900">{currentTeacher ? currentTeacher.name : 'Ibu Rahma, S.Pd'}</p>
+            <p className="text-[10px] text-slate-500">NIP. 19880315 201202 2 004</p>
+          </div>
+          <div>
+            <p className="font-bold text-slate-600">Menyetujui,</p>
+            <p className="font-extrabold text-slate-800 mt-1">Guru Bimbingan Konseling (BK)</p>
+            <div className="h-16"></div>
+            <p className="font-bold underline text-slate-900">Bapak I Sumayasa, M.Pd</p>
+            <p className="text-[10px] text-slate-500">NIP. 19850412 201001 1 002</p>
+          </div>
+        </div>
+      </div>
+
+      {/* MODAL: Edit Akun Guru */}
+      {editingTeacher && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="p-2 bg-indigo-50 text-indigo-600 rounded-xl"><Edit className="w-5 h-5" /></span>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-800">Edit Akun Guru</h3>
+                  <p className="text-xs text-slate-500">Perbaiki ejaan nama, email, password, atau kelas diampu.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingTeacher(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditTeacher} className="flex flex-col gap-3.5 text-xs">
+              <div className="flex flex-col gap-1.5">
+                <label className="font-bold text-slate-700">Nama Lengkap Guru (Beserta Gelar):</label>
+                <input
+                  type="text"
+                  required
+                  value={editTeacherName}
+                  onChange={(e) => setEditTeacherName(e.target.value)}
+                  className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white font-bold text-slate-800 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-bold text-slate-700">Email Login Guru:</label>
+                  <input
+                    type="email"
+                    required
+                    value={editTeacherEmail}
+                    onChange={(e) => setEditTeacherEmail(e.target.value)}
+                    className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white font-medium text-slate-800 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-bold text-slate-700">Password Baru / PIN:</label>
+                  <input
+                    type="text"
+                    required
+                    value={editTeacherPassword}
+                    onChange={(e) => setEditTeacherPassword(e.target.value)}
+                    className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white font-mono font-bold text-slate-800 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-700">Pilihan Kelas diAmpu:</label>
+                  <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                    {editTeacherClasses.length} Kelas Terpilih
+                  </span>
+                </div>
+
+                <div className="p-3 bg-slate-50 border-2 border-slate-200 rounded-2xl flex flex-col gap-2.5 max-h-[180px] overflow-y-auto">
+                  {['Kelas VII A', 'Kelas VII B', 'Kelas VII C', 'Kelas VII D', 'Kelas VII E',
+                    'Kelas VIII A', 'Kelas VIII B', 'Kelas VIII C', 'Kelas VIII D', 'Kelas VIII E',
+                    'Kelas IX A', 'Kelas IX B', 'Kelas IX C', 'Kelas IX D', 'Kelas IX E',
+                    'Guru Bimbingan Konseling (BK)', 'Umum / Lintas Kelas'].map((cls) => {
+                    const isSelected = editTeacherClasses.includes(cls);
+                    return (
+                      <button
+                        key={cls}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            setEditTeacherClasses(prev => prev.filter(c => c !== cls));
+                          } else {
+                            setEditTeacherClasses(prev => [...prev, cls]);
+                          }
+                        }}
+                        className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all text-left ${isSelected ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'}`}
+                      >
+                        {isSelected ? '✓ ' : '+ '}{cls}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingTeacher(null)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold rounded-xl shadow-md transition-colors flex items-center gap-1.5"
+                >
+                  💾 Simpan Perubahan Guru
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Edit Profil Siswa */}
+      {editingStudent && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="p-2 bg-sky-50 text-sky-600 rounded-xl"><Edit className="w-5 h-5" /></span>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-800">Edit Profil Siswa</h3>
+                  <p className="text-xs text-slate-500">Perbaiki nama, kelas, emoji avatar, atau Guru Wali pengasuh.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingStudent(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditStudent} className="flex flex-col gap-3.5 text-xs">
+              <div className="flex flex-col gap-1.5">
+                <label className="font-bold text-slate-700">Nama Lengkap Siswa:</label>
+                <input
+                  type="text"
+                  required
+                  value={editStudentName}
+                  onChange={(e) => setEditStudentName(e.target.value)}
+                  className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white font-bold text-slate-800 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-bold text-slate-700">Kelas Siswa:</label>
+                  <select
+                    value={editStudentClass}
+                    onChange={(e) => setEditStudentClass(e.target.value)}
+                    className="px-3 py-2.5 border-2 border-slate-200 rounded-xl bg-white font-bold text-slate-700 focus:outline-none focus:border-sky-500"
+                  >
+                    <optgroup label="Kelas VII">
+                      <option value="Kelas VII A">Kelas VII A</option>
+                      <option value="Kelas VII B">Kelas VII B</option>
+                      <option value="Kelas VII C">Kelas VII C</option>
+                      <option value="Kelas VII D">Kelas VII D</option>
+                      <option value="Kelas VII E">Kelas VII E</option>
+                    </optgroup>
+                    <optgroup label="Kelas VIII">
+                      <option value="Kelas VIII A">Kelas VIII A</option>
+                      <option value="Kelas VIII B">Kelas VIII B</option>
+                      <option value="Kelas VIII C">Kelas VIII C</option>
+                      <option value="Kelas VIII D">Kelas VIII D</option>
+                      <option value="Kelas VIII E">Kelas VIII E</option>
+                    </optgroup>
+                    <optgroup label="Kelas IX">
+                      <option value="Kelas IX A">Kelas IX A</option>
+                      <option value="Kelas IX B">Kelas IX B</option>
+                      <option value="Kelas IX C">Kelas IX C</option>
+                      <option value="Kelas IX D">Kelas IX D</option>
+                      <option value="Kelas IX E">Kelas IX E</option>
+                    </optgroup>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-bold text-slate-700">Guru Wali Pengasuh:</label>
+                  <select
+                    value={editStudentGuruWali}
+                    onChange={(e) => setEditStudentGuruWali(e.target.value)}
+                    className="px-3 py-2.5 border-2 border-slate-200 rounded-xl bg-white font-bold text-slate-700 focus:outline-none focus:border-sky-500"
+                  >
+                    {teachers.map((t) => (
+                      <option key={t.id} value={t.name}>
+                        {t.name} ({t.class})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="font-bold text-slate-700">Pilih Avatar Emoji:</label>
+                <div className="grid grid-cols-6 gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
+                  {['👦', '👧', '🧑', '🧒', '⭐', '🚀', '🎨', '⚽', '🎒', '🐱', '🐶', '🦄'].map((av) => (
+                    <button
+                      key={av}
+                      type="button"
+                      onClick={() => setEditStudentAvatar(av)}
+                      className={`py-1.5 text-lg rounded-lg transition-all ${editStudentAvatar === av ? 'bg-sky-500 text-white shadow-md' : 'hover:bg-slate-200'}`}
+                    >
+                      {av}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingStudent(null)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-sky-500 hover:bg-sky-400 text-white font-extrabold rounded-xl shadow-md transition-colors flex items-center gap-1.5"
+                >
+                  💾 Simpan Perubahan Profil
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
