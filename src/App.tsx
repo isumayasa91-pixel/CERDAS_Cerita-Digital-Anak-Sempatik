@@ -224,7 +224,7 @@ const CHARACTERS = [
 ];
 
 export default function App() {
-  const [role, setRole] = useState<'murid' | 'guru_wali' | 'guru_bk' | 'admin'>('murid');
+  const [role, setRole] = useState<'portal' | 'murid' | 'guru_wali' | 'guru_bk' | 'admin'>('portal');
   const [students, setStudents] = useState<any[]>([]);
   const [stories, setStories] = useState<any[]>([]);
   const [teachers, setTeachers] = useState<any[]>([]);
@@ -319,6 +319,46 @@ export default function App() {
   const [adminAuthError, setAdminAuthError] = useState('');
   const [adminTab, setAdminTab] = useState<'teachers' | 'students' | 'stats'>('teachers');
 
+  // Admin Secure PIN Modal States
+  const [showAdminPinModal, setShowAdminPinModal] = useState(false);
+  const [adminEmailInput, setAdminEmailInput] = useState('isumayasa91@guru.smp.belajar.id');
+  const [adminPinInput, setAdminPinInput] = useState('');
+  const [adminPinError, setAdminPinError] = useState('');
+
+  const handleVerifyAdminPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = adminEmailInput.trim().toLowerCase();
+    const cleanPass = adminPinInput.trim();
+
+    const isAuthorizedAdmin = 
+      cleanEmail === 'isumayasa91@guru.smp.belajar.id' ||
+      cleanEmail === 'admin@cerdas.id' ||
+      teachers.some(t => t.email?.toLowerCase() === cleanEmail);
+
+    const isValidPassword = 
+      cleanPass === 'admin123' || 
+      cleanPass === '123456' || 
+      cleanPass === 'cerdas123' ||
+      teachers.some(t => t.email?.toLowerCase() === cleanEmail && t.password === cleanPass);
+
+    if (isAuthorizedAdmin && isValidPassword) {
+      setShowAdminPinModal(false);
+      setAdminPinInput('');
+      setAdminPinError('');
+      setIsAdminLoggedIn(true);
+      localStorage.setItem('isAdminLoggedIn', 'true');
+      setAdminEmail(cleanEmail);
+      setRole('admin');
+      playTone(523.25, 'sine', 0.15);
+    } else if (!isAuthorizedAdmin) {
+      setAdminPinError('❌ Akses Ditolak! Email ini tidak terdaftar sebagai Administrator sekolah.');
+      playTone(220, 'sawtooth', 0.2);
+    } else {
+      setAdminPinError('❌ Kata sandi / PIN administrator salah.');
+      playTone(220, 'sawtooth', 0.2);
+    }
+  };
+
   // Admin New Teacher Form
   const [adminNewTeacherName, setAdminNewTeacherName] = useState('');
   const [adminNewTeacherEmail, setAdminNewTeacherEmail] = useState('');
@@ -396,6 +436,21 @@ export default function App() {
       const updated = students.find(s => s.id === selectedStudent.id);
       if (updated) setSelectedStudent(updated);
     }
+  }, [students]);
+
+  // Auto-sync guruWali for all students based on their respective class teacher
+  useEffect(() => {
+    students.forEach(st => {
+      const isPrama = st.name.toUpperCase().includes('I GEDE PRAMA PUTRA ANTARA');
+      const expectedClass = isPrama ? 'Kelas VII A' : st.class;
+      const expectedGuru = expectedClass === 'Kelas VII A' ? 'I Nyoman Gede Juwastra, S.Sn' :
+                           expectedClass.startsWith('Kelas VII') ? 'Ibu Rahma, S.Pd' :
+                           expectedClass.startsWith('Kelas VIII') ? 'Bapak I Sumayasa, M.Pd' :
+                           expectedClass.startsWith('Kelas IX') ? 'Bapak Deni Saputra, S.Pd' : 'Bapak I Sumayasa, M.Pd';
+      if (st.guruWali !== expectedGuru || (isPrama && st.class !== 'Kelas VII A')) {
+        updateStudentInFirestore(st.id, { guruWali: expectedGuru, ...(isPrama ? { class: 'Kelas VII A' } : {}) });
+      }
+    });
   }, [students]);
 
   // Audio Recording Logic
@@ -772,7 +827,7 @@ export default function App() {
     // Check 1-time registration constraint
     const existing = students.find(s => s.name.trim().toLowerCase() === cleanName.toLowerCase());
     if (existing) {
-      alert(`⚠️ Siswa dengan nama "${cleanName}" sudah terdaftar dalam sistem CERDAS!\n\nSetiap anak hanya dapat mendaftar 1 kali. Jika ingin mendaftar ulang, minta Admin untuk mereset akun siswa di Menu Admin terlebih dahulu.`);
+      alert(`⚠️ Murid dengan nama "${cleanName}" sudah terdaftar dalam sistem CERDAS!\n\nSetiap anak hanya dapat mendaftar 1 kali. Jika ingin mendaftar ulang, minta Admin untuk mereset akun murid di Menu Admin terlebih dahulu.`);
       return;
     }
 
@@ -789,24 +844,24 @@ export default function App() {
       playTone(523.25, 'sine', 0.15);
     } catch (err) {
       console.error(err);
-      alert("Gagal menambahkan siswa ke Firestore.");
+      alert("Gagal menambahkan murid ke Firestore.");
     }
   };
 
   // Reset student account (Admin feature)
   const handleResetStudent = async (studentId: string, name: string) => {
-    if (!window.confirm(`Apakah Anda yakin ingin MERESET akun siswa "${name}"?\n\nIni akan menghapus akun agar siswa dapat mendaftar ulang secara bersih.`)) {
+    if (!window.confirm(`Apakah Anda yakin ingin MERESET akun murid "${name}"?\n\nIni akan menghapus akun agar murid dapat mendaftar ulang secara bersih.`)) {
       return;
     }
 
     try {
       await deleteStudentFromFirestore(studentId, stories);
       playTone(523.25, 'sine', 0.2);
-      setAdminStudentSuccessMsg(`✅ Akun siswa "${name}" berhasil di-reset oleh Admin! Siswa kini dapat mendaftar kembali.`);
+      setAdminStudentSuccessMsg(`✅ Akun murid "${name}" berhasil di-reset oleh Admin! Murid kini dapat mendaftar kembali.`);
       setTimeout(() => setAdminStudentSuccessMsg(''), 6000);
     } catch (err) {
       console.error(err);
-      alert("Gagal mereset akun siswa.");
+      alert("Gagal mereset akun murid.");
     }
   };
 
@@ -830,7 +885,7 @@ export default function App() {
 
   // Delete student and their story history
   const handleDeleteStudent = async (studentId: string, name: string) => {
-    if (!window.confirm(`Apakah Anda yakin ingin menghapus siswa "${name}" beserta seluruh riwayat ceritanya?`)) {
+    if (!window.confirm(`Apakah Anda yakin ingin menghapus murid "${name}" beserta seluruh riwayat ceritanya?`)) {
       return;
     }
 
@@ -839,7 +894,7 @@ export default function App() {
       playTone(220, 'triangle', 0.2);
     } catch (err) {
       console.error(err);
-      alert("Gagal menghapus siswa dari Firestore.");
+      alert("Gagal menghapus murid dari Firestore.");
     }
   };
 
@@ -950,7 +1005,7 @@ export default function App() {
       setBkAuthError('');
       playTone(523.25, 'sine', 0.15);
     } else {
-      setBkAuthError('Siswa tidak terdaftar. Masukkan nama lengkap siswa yang sesuai.');
+      setBkAuthError('Murid tidak terdaftar. Masukkan nama lengkap murid yang sesuai.');
     }
   };
 
@@ -968,17 +1023,24 @@ export default function App() {
     const cleanEmail = adminEmail.trim().toLowerCase();
     const cleanPass = adminPassword.trim();
 
-    if (
+    const isAuthorizedAdmin = 
+      cleanEmail === 'isumayasa91@guru.smp.belajar.id' ||
+      cleanEmail === 'admin@cerdas.id' ||
+      teachers.some(t => t.email?.toLowerCase() === cleanEmail);
+
+    const isValidPassword = 
       cleanPass === 'admin123' || 
-      cleanPass === 'admin' || 
       cleanPass === '123456' || 
       cleanPass === 'cerdas123' ||
-      (cleanEmail === 'isumayasa91@guru.smp.belajar.id' && (cleanPass === 'admin123' || cleanPass === 'password123'))
-    ) {
+      teachers.some(t => t.email?.toLowerCase() === cleanEmail && t.password === cleanPass);
+
+    if (isAuthorizedAdmin && isValidPassword) {
       setIsAdminLoggedIn(true);
       localStorage.setItem('isAdminLoggedIn', 'true');
       setAdminPassword('');
       playTone(523.25, 'sine', 0.15);
+    } else if (!isAuthorizedAdmin) {
+      setAdminAuthError('❌ Akses Ditolak! Email ini tidak terdaftar sebagai Administrator sekolah.');
     } else {
       setAdminAuthError('Kata sandi administrator salah. Gunakan "admin123" atau PIN 123456.');
     }
@@ -1045,14 +1107,14 @@ export default function App() {
     e.preventDefault();
     const cleanName = adminNewStudentName.trim();
     if (!cleanName) {
-      alert("Nama siswa wajib diisi!");
+      alert("Nama murid wajib diisi!");
       return;
     }
 
     // Check 1-time registration constraint
     const existing = students.find(s => s.name.trim().toLowerCase() === cleanName.toLowerCase());
     if (existing) {
-      alert(`⚠️ Siswa dengan nama "${cleanName}" sudah terdaftar sebelumnya!\n\nGunakan tombol "Reset Akun" di sebelah kanan jika ingin mendaftarkan ulang siswa ini.`);
+      alert(`⚠️ Murid dengan nama "${cleanName}" sudah terdaftar sebelumnya!\n\nGunakan tombol "Reset Akun" di sebelah kanan jika ingin mendaftarkan ulang murid ini.`);
       return;
     }
 
@@ -1065,12 +1127,12 @@ export default function App() {
       });
 
       setAdminNewStudentName('');
-      setAdminStudentSuccessMsg(`✅ Akun Siswa "${cleanName}" berhasil didaftarkan ke Cloud Firestore!`);
+      setAdminStudentSuccessMsg(`✅ Akun Murid "${cleanName}" berhasil didaftarkan ke Cloud Firestore!`);
       setTimeout(() => setAdminStudentSuccessMsg(''), 5000);
       playTone(523.25, 'sine', 0.15);
     } catch (err) {
       console.error(err);
-      alert("Gagal mendaftarkan siswa.");
+      alert("Gagal mendaftarkan murid.");
     }
   };
 
@@ -1126,7 +1188,7 @@ export default function App() {
   const handleSaveEditStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStudent || !editStudentName.trim()) {
-      alert("Nama siswa wajib diisi!");
+      alert("Nama murid wajib diisi!");
       return;
     }
 
@@ -1139,12 +1201,12 @@ export default function App() {
       });
 
       setEditingStudent(null);
-      setAdminStudentSuccessMsg(`✅ Profil Siswa "${editStudentName}" telah berhasil diperbarui!`);
+      setAdminStudentSuccessMsg(`✅ Profil Murid "${editStudentName}" telah berhasil diperbarui!`);
       setTimeout(() => setAdminStudentSuccessMsg(''), 5000);
       playTone(523.25, 'sine', 0.15);
     } catch (err) {
       console.error(err);
-      alert("Gagal memperbarui profil siswa.");
+      alert("Gagal memperbarui profil murid.");
     }
   };
 
@@ -1229,7 +1291,14 @@ export default function App() {
         </div>
 
         {/* Zone 2: Segmented Controls - Mode Role Selection */}
-        <nav className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl max-w-lg w-auto overflow-x-auto">
+        <nav className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl max-w-xl w-auto overflow-x-auto">
+          <button 
+            type="button"
+            onClick={() => { setRole('portal'); playTone(280, 'sine', 0.1); }}
+            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'portal' ? 'bg-sky-600 text-white shadow-sm font-extrabold' : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200'}`}
+          >
+            🏠 <span className="hidden sm:inline">Menu</span> Portal
+          </button>
           <button 
             onClick={() => { setRole('murid'); playTone(300, 'sine', 0.1); }}
             className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'murid' ? 'bg-white text-sky-600 shadow-sm font-extrabold ring-1 ring-sky-300' : 'text-slate-600 hover:text-slate-900'}`}
@@ -1265,18 +1334,16 @@ export default function App() {
             🩺 <span className="hidden sm:inline">Ruang</span> BK & Ortu {role === 'murid' && <Lock className="w-3 h-3 text-slate-400" />}
           </button>
           <button 
+            type="button"
             onClick={() => {
-              if (role === 'murid') {
-                setShowRoleUnlockModal('admin');
-                playTone(300, 'triangle', 0.15);
-              } else {
-                setRole('admin');
-                playTone(450, 'sine', 0.1);
-              }
+              setShowAdminPinModal(true);
+              setAdminPinInput('');
+              setAdminPinError('');
+              playTone(350, 'triangle', 0.1);
             }}
             className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${role === 'admin' ? 'bg-rose-600 text-white shadow-sm font-extrabold' : 'text-rose-700 bg-rose-50 hover:bg-rose-100'}`}
           >
-            <Shield className="w-3.5 h-3.5" /> <span className="font-bold">Admin</span> {role === 'murid' && <Lock className="w-3 h-3 text-rose-400" />}
+            <Shield className="w-3.5 h-3.5" /> <span className="font-bold">Admin</span>
           </button>
         </nav>
 
@@ -1308,6 +1375,131 @@ export default function App() {
       {/* Primary Workspace Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col gap-6">
         
+        {/* ==================================================================== */}
+        {/* PORTAL UTAMA LOGIN (GATEWAY)                                         */}
+        {/* ==================================================================== */}
+        {role === 'portal' && (
+          <div className="max-w-4xl w-full mx-auto my-auto py-8 flex flex-col items-center gap-8 animate-fade-in">
+            <div className="text-center flex flex-col items-center gap-3">
+              <div className="w-20 h-20 bg-sky-500 rounded-3xl flex items-center justify-center shadow-xl shadow-sky-200 text-white">
+                <svg className="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                </svg>
+              </div>
+              <h1 className="text-2xl md:text-4xl font-black text-slate-900 tracking-tight">
+                PORTAL UTAMA CERDAS
+              </h1>
+              <p className="text-sm md:text-base text-slate-600 max-w-xl font-medium">
+                (Cerita Digital Anak Sempatik). Silakan pilih ruang dan portal login sesuai peran Anda di bawah ini:
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 w-full">
+              {/* Card 1: Ruang Anak */}
+              <button
+                type="button"
+                onClick={() => { setRole('murid'); playTone(440, 'sine', 0.15); }}
+                className="bg-white hover:bg-sky-50/50 border-2 border-slate-200 hover:border-sky-400 p-6 rounded-3xl shadow-sm hover:shadow-xl transition-all flex flex-col gap-4 text-left group relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-sky-100/50 rounded-full blur-2xl group-hover:bg-sky-200/60 transition-all pointer-events-none"></div>
+                <div className="w-14 h-14 bg-sky-100 text-sky-600 rounded-2xl flex items-center justify-center text-3xl shadow-inner">
+                  🎒
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold text-slate-900 group-hover:text-sky-600 transition-colors">
+                    Ruang Anak (Murid)
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Pilih nama siswa, tulis jurnal refleksi emosi harian dengan metode 4F, dan mengobrol dengan kawan emosi (Koko, Sasa, Giga, Pipi, Caca).
+                  </p>
+                </div>
+                <div className="mt-auto pt-2 flex items-center gap-2 text-sky-600 font-extrabold text-xs">
+                  <span>Masuk ke Ruang Anak</span>
+                  <span>→</span>
+                </div>
+              </button>
+
+              {/* Card 2: Ruang Guru Wali */}
+              <button
+                type="button"
+                onClick={() => { setRole('guru_wali'); playTone(480, 'sine', 0.15); }}
+                className="bg-white hover:bg-indigo-50/50 border-2 border-slate-200 hover:border-indigo-400 p-6 rounded-3xl shadow-sm hover:shadow-xl transition-all flex flex-col gap-4 text-left group relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-100/50 rounded-full blur-2xl group-hover:bg-indigo-200/60 transition-all pointer-events-none"></div>
+                <div className="w-14 h-14 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center text-3xl shadow-inner">
+                  👩‍🏫
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold text-slate-900 group-hover:text-indigo-600 transition-colors">
+                    Ruang Guru Wali (Kelas)
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Login akun guru wali, pantau emosi harian murid asuhan secara real-time, berikan tanggapan hangat, dan cetak rekapitulasi kelas.
+                  </p>
+                </div>
+                <div className="mt-auto pt-2 flex items-center gap-2 text-indigo-600 font-extrabold text-xs">
+                  <span>Login Guru Wali</span>
+                  <span>→</span>
+                </div>
+              </button>
+
+              {/* Card 3: Ruang BK & Ortu */}
+              <button
+                type="button"
+                onClick={() => { setRole('guru_bk'); playTone(520, 'sine', 0.15); }}
+                className="bg-white hover:bg-emerald-50/50 border-2 border-slate-200 hover:border-emerald-400 p-6 rounded-3xl shadow-sm hover:shadow-xl transition-all flex flex-col gap-4 text-left group relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-100/50 rounded-full blur-2xl group-hover:bg-emerald-200/60 transition-all pointer-events-none"></div>
+                <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center text-3xl shadow-inner">
+                  🩺
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold text-slate-900 group-hover:text-emerald-600 transition-colors">
+                    Ruang Guru BK & Orang Tua
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Portal penanganan rujukan kasus khusus berisiko tinggi oleh Guru BK serta akses pemantauan perkembangan anak bagi orang tua.
+                  </p>
+                </div>
+                <div className="mt-auto pt-2 flex items-center gap-2 text-emerald-600 font-extrabold text-xs">
+                  <span>Akses Portal BK & Ortu</span>
+                  <span>→</span>
+                </div>
+              </button>
+
+              {/* Card 4: Portal Admin */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAdminPinModal(true);
+                  setAdminPinInput('');
+                  setAdminPinError('');
+                  playTone(350, 'triangle', 0.1);
+                }}
+                className="bg-white hover:bg-rose-50/50 border-2 border-slate-200 hover:border-rose-400 p-6 rounded-3xl shadow-sm hover:shadow-xl transition-all flex flex-col gap-4 text-left group relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-rose-100/50 rounded-full blur-2xl group-hover:bg-rose-200/60 transition-all pointer-events-none"></div>
+                <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center text-3xl shadow-inner">
+                  🛡️
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold text-slate-900 group-hover:text-rose-600 transition-colors">
+                    Portal Admin Sekolah
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Kelola database 465+ siswa, pendaftaran/reset akun siswa, tambah & edit akun guru wali, serta cetak kartu akses login resmi.
+                  </p>
+                </div>
+                <div className="mt-auto pt-2 flex items-center gap-2 text-rose-600 font-extrabold text-xs">
+                  <span>Login Administrator</span>
+                  <span>→</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ==================================================================== */}
         {/* ROLE: MURID (ANAK-ANAK)                                             */}
         {/* ==================================================================== */}
@@ -3134,7 +3326,7 @@ export default function App() {
               </span>
               <h3 className="text-xl font-extrabold text-slate-800">Portal Administrator Sekolah</h3>
               <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                Kelola pendaftaran akun Guru Wali, Guru BK, dan data Siswa secara terpusat langsung ke Cloud Firestore.
+                Kelola pendaftaran akun Guru Wali, Guru BK, dan data Murid secara terpusat langsung ke Cloud Firestore.
               </p>
             </div>
 
@@ -3202,7 +3394,7 @@ export default function App() {
                     </span>
                   </div>
                   <p className="text-xs text-rose-100 mt-0.5">
-                    Kelola dan daftarkan akun resmi Guru Wali, Guru BK, dan data Siswa yang tersinkronisasi otomatis ke semua perangkat.
+                    Kelola dan daftarkan akun resmi Guru Wali, Guru BK, dan data Murid yang tersinkronisasi otomatis ke semua perangkat.
                   </p>
                 </div>
               </div>
@@ -3227,7 +3419,7 @@ export default function App() {
                 onClick={() => { setAdminTab('students'); playTone(350, 'sine', 0.05); }}
                 className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all whitespace-nowrap ${adminTab === 'students' ? 'bg-rose-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}
               >
-                <Users className="w-4 h-4" /> Kelola & Daftarkan Siswa ({students.length})
+                <Users className="w-4 h-4" /> Kelola & Daftarkan Murid ({students.length})
               </button>
               <button
                 onClick={() => { setAdminTab('stats'); playTone(400, 'sine', 0.05); }}
@@ -3515,8 +3707,8 @@ export default function App() {
                   <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
                     <span className="p-2 bg-sky-50 text-sky-600 rounded-xl"><UserPlus className="w-5 h-5" /></span>
                     <div>
-                      <h4 className="font-extrabold text-sm text-slate-800">Daftarkan Profil Siswa Baru</h4>
-                      <p className="text-[11px] text-slate-500">Siswa akan langsung terhubung dengan Guru Wali yang dipilih.</p>
+                      <h4 className="font-extrabold text-sm text-slate-800">Daftarkan Profil Murid Baru</h4>
+                      <p className="text-[11px] text-slate-500">Murid akan langsung terhubung dengan Guru Wali yang dipilih.</p>
                     </div>
                   </div>
 
@@ -3528,7 +3720,7 @@ export default function App() {
 
                   <form onSubmit={handleAdminAddStudent} className="flex flex-col gap-3.5 text-xs">
                     <div className="flex flex-col gap-1.5">
-                      <label className="font-bold text-slate-700">Nama Lengkap Siswa:</label>
+                      <label className="font-bold text-slate-700">Nama Lengkap Murid:</label>
                       <input
                         type="text"
                         required
@@ -3541,7 +3733,7 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div className="flex flex-col gap-1.5">
-                        <label className="font-bold text-slate-700">Kelas Siswa:</label>
+                        <label className="font-bold text-slate-700">Kelas Murid:</label>
                         <select
                           value={adminNewStudentClass}
                           onChange={(e) => setAdminNewStudentClass(e.target.value)}
@@ -3607,7 +3799,7 @@ export default function App() {
                       type="submit"
                       className="mt-2 py-3 bg-sky-500 hover:bg-sky-400 text-white font-extrabold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5 active:scale-95"
                     >
-                      <Plus className="w-4 h-4" /> Daftarkan Siswa ke Cloud
+                      <Plus className="w-4 h-4" /> Daftarkan Murid ke Cloud
                     </button>
                   </form>
                 </div>
@@ -3617,10 +3809,10 @@ export default function App() {
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <div className="flex items-center gap-2">
                       <span className="p-2 bg-sky-50 text-sky-600 rounded-xl">🎒</span>
-                      <h4 className="font-extrabold text-sm text-slate-800">Daftar Siswa Terdaftar</h4>
+                      <h4 className="font-extrabold text-sm text-slate-800">Daftar Murid Terdaftar</h4>
                     </div>
                     <span className="text-xs font-bold bg-slate-100 px-3 py-1 rounded-full text-slate-600">
-                      Total: {students.length} Siswa
+                      Total: {students.length} Murid
                     </span>
                   </div>
 
@@ -3657,7 +3849,7 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditStudent(st)}
-                                title="Edit Profil Siswa (Perbaiki Nama, Kelas, Avatar, atau Guru Wali)"
+                                title="Edit Profil Murid (Perbaiki Nama, Kelas, Avatar, atau Guru Wali)"
                                 className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 font-extrabold text-[11px] rounded-xl transition-colors border border-sky-200 flex items-center gap-1 shadow-sm"
                               >
                                 <Edit className="w-3.5 h-3.5 text-sky-600" /> Edit
@@ -3665,7 +3857,7 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={() => handleResetStudent(st.id, st.name)}
-                                title="Reset pendaftaran akun siswa agar dapat mendaftar kembali"
+                                title="Reset pendaftaran akun murid agar dapat mendaftar kembali"
                                 className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-extrabold text-[11px] rounded-xl transition-colors border border-amber-200 flex items-center gap-1 shadow-sm"
                               >
                                 <RefreshCw className="w-3.5 h-3.5 text-amber-600" /> Reset Akun
@@ -4300,6 +4492,81 @@ export default function App() {
                   className="px-5 py-2 bg-sky-500 hover:bg-sky-400 text-white font-extrabold rounded-xl shadow-md transition-colors flex items-center gap-1.5"
                 >
                   💾 Simpan Perubahan Profil
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Verifikasi PIN Keamanan Admin */}
+      {showAdminPinModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-200 flex flex-col gap-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="p-2.5 bg-rose-50 text-rose-600 rounded-2xl">
+                  <Shield className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="font-extrabold text-sm text-slate-800">Verifikasi Akses Admin</h3>
+                  <p className="text-[11px] text-slate-500">Masukkan PIN Keamanan Admin Sekolah</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdminPinModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {adminPinError && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold p-3 rounded-xl">
+                {adminPinError}
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyAdminPin} className="flex flex-col gap-3.5">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-slate-700">Email Administrator:</label>
+                <input
+                  type="email"
+                  required
+                  autoFocus
+                  value={adminEmailInput}
+                  onChange={(e) => setAdminEmailInput(e.target.value)}
+                  placeholder="admin@cerdas.id"
+                  className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-slate-50 focus:bg-white text-xs font-medium text-slate-800 focus:outline-none focus:border-rose-500"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-slate-700">Kata Sandi / PIN Administrator:</label>
+                <input
+                  type="password"
+                  required
+                  value={adminPinInput}
+                  onChange={(e) => setAdminPinInput(e.target.value)}
+                  placeholder="Masukkan password admin (default: admin123)"
+                  className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-slate-50 focus:bg-white text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-rose-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAdminPinModal(false)}
+                  className="px-4 py-2.5 border border-slate-200 rounded-xl font-bold text-xs text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl shadow-md transition-colors flex items-center gap-1.5"
+                >
+                  <Lock className="w-4 h-4" /> Verifikasi & Masuk
                 </button>
               </div>
             </form>

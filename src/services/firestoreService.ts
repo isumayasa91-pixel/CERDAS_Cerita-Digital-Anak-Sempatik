@@ -51,16 +51,18 @@ export interface Story {
 }
 
 const DEFAULT_STUDENTS: Student[] = [
-  { id: 'budi', name: 'Budi Setiawan', class: 'Kelas VII A', avatar: '👦', status: 'Aktif', guruWali: 'Ibu Rahma, S.Pd', createdAt: new Date().toISOString() },
-  { id: 'siti', name: 'Siti Rahma', class: 'Kelas VII A', avatar: '👧', status: 'Aktif', guruWali: 'Ibu Rahma, S.Pd', createdAt: new Date().toISOString() },
+  { id: 'budi', name: 'Budi Setiawan', class: 'Kelas VII A', avatar: '👦', status: 'Aktif', guruWali: 'I Nyoman Gede Juwastra, S.Sn', createdAt: new Date().toISOString() },
+  { id: 'siti', name: 'Siti Rahma', class: 'Kelas VII A', avatar: '👧', status: 'Aktif', guruWali: 'I Nyoman Gede Juwastra, S.Sn', createdAt: new Date().toISOString() },
   { id: 'andi', name: 'Andi Prasetyo', class: 'Kelas VIII B', avatar: '🧑', status: 'Aktif', guruWali: 'Bapak I Sumayasa, M.Pd', createdAt: new Date().toISOString() },
+  { id: 'prama', name: 'I GEDE PRAMA PUTRA ANTARA', class: 'Kelas VII A', avatar: '👦', status: 'Aktif', guruWali: 'I Nyoman Gede Juwastra, S.Sn', createdAt: new Date().toISOString() },
 ];
 
 const DEFAULT_TEACHERS: Teacher[] = [
-  { id: 't-1', name: 'Ibu Rahma, S.Pd', email: 'rahma@cerdas.id', password: 'password123', class: 'Kelas VII A', createdAt: new Date().toISOString() },
-  { id: 't-2', name: 'Bapak I Sumayasa, M.Pd', email: 'isumayasa91@guru.smp.belajar.id', password: 'password123', class: 'Kelas VIII A', createdAt: new Date().toISOString() },
-  { id: 't-3', name: 'Bapak Deni Saputra, S.Pd', email: 'deni@cerdas.id', password: 'password123', class: 'Kelas IX A', createdAt: new Date().toISOString() },
-  { id: 't-4', name: 'Ibu Sri Wahyuni, S.Pd', email: 'sri@cerdas.id', password: 'password123', class: 'Umum', createdAt: new Date().toISOString() },
+  { id: 't-1', name: 'I Nyoman Gede Juwastra, S.Sn', email: 'nyoman@cerdas.id', password: 'password123', class: 'Kelas VII A', createdAt: new Date().toISOString() },
+  { id: 't-2', name: 'Ibu Rahma, S.Pd', email: 'rahma@cerdas.id', password: 'password123', class: 'Kelas VII B', createdAt: new Date().toISOString() },
+  { id: 't-3', name: 'Bapak I Sumayasa, M.Pd', email: 'isumayasa91@guru.smp.belajar.id', password: 'password123', class: 'Kelas VIII A', createdAt: new Date().toISOString() },
+  { id: 't-4', name: 'Bapak Deni Saputra, S.Pd', email: 'deni@cerdas.id', password: 'password123', class: 'Kelas IX A', createdAt: new Date().toISOString() },
+  { id: 't-5', name: 'Ibu Sri Wahyuni, S.Pd', email: 'sri@cerdas.id', password: 'password123', class: 'Umum', createdAt: new Date().toISOString() },
 ];
 
 const DEFAULT_STORIES: Story[] = [
@@ -294,15 +296,19 @@ export async function updateStudentInFirestore(studentId: string, updates: Parti
 }
 
 // Add Student
-export async function addStudentToFirestore(studentData: { name: string; class: string; avatar: string; guruWali: string }): Promise<Student> {
+export async function addStudentToFirestore(studentData: { name: string; class: string; avatar: string; guruWali?: string }): Promise<Student> {
   const id = `student-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const expectedGuru = studentData.class === 'Kelas VII A' ? 'I Nyoman Gede Juwastra, S.Sn' :
+                       studentData.class.startsWith('Kelas VII') ? 'Ibu Rahma, S.Pd' :
+                       studentData.class.startsWith('Kelas VIII') ? 'Bapak I Sumayasa, M.Pd' :
+                       studentData.class.startsWith('Kelas IX') ? 'Bapak Deni Saputra, S.Pd' : 'Bapak I Sumayasa, M.Pd';
   const newStudent: Student = {
     id,
     name: studentData.name,
     class: studentData.class,
     avatar: studentData.avatar || '👦',
     status: 'Aktif',
-    guruWali: studentData.guruWali,
+    guruWali: studentData.guruWali || expectedGuru,
     createdAt: new Date().toISOString()
   };
 
