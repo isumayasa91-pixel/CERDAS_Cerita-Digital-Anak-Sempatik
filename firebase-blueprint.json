@@ -1,0 +1,70 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "Profil siswa yang terdaftar di aplikasi CERDAS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "class": { "type": "string", "maxLength": 50 },
+        "avatar": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 50 },
+        "guruWali": { "type": "string", "maxLength": 150 },
+        "createdAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["name", "class", "guruWali"]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "Profil guru wali atau guru BK terdaftar",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "email": { "type": "string", "maxLength": 150 },
+        "password": { "type": "string", "maxLength": 200 },
+        "class": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["name", "email", "class"]
+    },
+    "Story": {
+      "title": "Story",
+      "description": "Catatan jurnal refleksi emosi 4F (Fact, Feeling, Finding, Future) siswa",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "timestamp": { "type": "string", "maxLength": 100 },
+        "fact": { "type": "string", "maxLength": 5000 },
+        "feeling": { "type": "string", "maxLength": 100 },
+        "character": { "type": "string", "maxLength": 100 },
+        "finding": { "type": "string", "maxLength": 5000 },
+        "future": { "type": "string", "maxLength": 5000 },
+        "audioBase64": { "type": "string", "maxLength": 5000000 },
+        "guruNote": { "type": "string", "maxLength": 3000 },
+        "counselorNote": { "type": "string", "maxLength": 3000 },
+        "escalated": { "type": "boolean" },
+        "status": { "type": "string", "maxLength": 100 },
+        "aiRecommendation": { "type": "string", "maxLength": 5000 }
+      },
+      "required": ["studentId", "studentName", "fact", "feeling", "finding", "future"]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/Student" },
+      "description": "Data profil siswa"
+    },
+    "/teachers/{teacherId}": {
+      "schema": { "$ref": "#/entities/Teacher" },
+      "description": "Data guru wali yang terdaftar"
+    },
+    "/stories/{storyId}": {
+      "schema": { "$ref": "#/entities/Story" },
+      "description": "Data jurnal emosi & refleksi 4F siswa"
+    }
+  }
+}

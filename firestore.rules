@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Connection test document
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+
+    // Students collection
+    match /students/{studentId} {
+      allow read: if true;
+      allow create, update, delete: if true;
+    }
+
+    // Teachers collection
+    match /teachers/{teacherId} {
+      allow read: if true;
+      allow create, update, delete: if true;
+    }
+
+    // Stories (CERDAS reflections) collection
+    match /stories/{storyId} {
+      allow read: if true;
+      allow create, update, delete: if true;
+    }
+
+    // Fallback default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
