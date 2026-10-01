@@ -62,6 +62,7 @@ const DEFAULT_TEACHERS: Teacher[] = [
   { id: 't-2', name: 'Ibu Rahma, S.Pd', email: 'rahma@cerdas.id', password: 'password123', class: 'Kelas VII B', createdAt: new Date().toISOString() },
   { id: 't-3', name: 'Bapak I Sumayasa, M.Pd', email: 'isumayasa91@guru.smp.belajar.id', password: 'password123', class: 'Kelas VIII A', createdAt: new Date().toISOString() },
   { id: 't-4', name: 'Bapak Deni Saputra, S.Pd', email: 'deni@cerdas.id', password: 'password123', class: 'Kelas IX A', createdAt: new Date().toISOString() },
+  { id: 't-bk', name: 'Ni Made Medi Astuti, S.Pd., M.Pd', email: 'mediastuti@cerdas.id', password: 'password123', class: 'Guru BK (Kelas VII - IX)', createdAt: new Date().toISOString() },
   { id: 't-5', name: 'Ibu Sri Wahyuni, S.Pd', email: 'sri@cerdas.id', password: 'password123', class: 'Umum', createdAt: new Date().toISOString() },
 ];
 
@@ -113,8 +114,8 @@ const DEFAULT_STORIES: Story[] = [
     audioBase64: '',
     guruNote: 'Terima kasih sudah bercerita secara jujur Andi. Bapak akan segera berkoordinasi dengan Guru BK untuk mendampingi kamu.',
     counselorNote: 'Andi telah dijadwalkan sesi konseling suportif di ruang BK hari Rabu pukul 09.00. Pendampingan berkelanjutan telah dimulai.',
-    escalated: true,
-    status: 'Butuh Bantuan',
+    escalated: false,
+    status: 'Selesai Direfleksi',
     aiRecommendation: 'Perlu intervensi suportif segera dari Guru BK untuk memberikan ruang aman dan mengidentifikasi potensi perundungan (bullying).'
   }
 ];
@@ -166,7 +167,7 @@ export async function seedFullRoster465StudentsToFirestore(): Promise<number> {
   ];
 
   const classes = [
-    { name: 'Kelas VII A', guru: 'Ibu Rahma, S.Pd' },
+    { name: 'Kelas VII A', guru: 'I Nyoman Gede Juwastra, S.Sn' },
     { name: 'Kelas VII B', guru: 'Ibu Rahma, S.Pd' },
     { name: 'Kelas VII C', guru: 'Ibu Rahma, S.Pd' },
     { name: 'Kelas VII D', guru: 'Ibu Rahma, S.Pd' },
@@ -409,6 +410,20 @@ export async function escalateStoryInFirestore(storyId: string) {
     await updateDoc(ref, {
       escalated: true,
       status: 'Butuh Bantuan'
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `stories/${storyId}`);
+    throw error;
+  }
+}
+
+// Remove Story from Guru BK Referral (Unescalate)
+export async function unescalateStoryInFirestore(storyId: string) {
+  try {
+    const ref = doc(db, 'stories', storyId);
+    await updateDoc(ref, {
+      escalated: false,
+      status: 'Selesai Direfleksi'
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `stories/${storyId}`);

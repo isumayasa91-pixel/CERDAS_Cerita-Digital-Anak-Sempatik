@@ -36,6 +36,7 @@ import {
   UserPlus,
   Printer,
   Edit,
+  Copy,
   X
 } from 'lucide-react';
 import {
@@ -54,6 +55,7 @@ import {
   updateTeacherInFirestore,
   updateGuruNoteInFirestore,
   escalateStoryInFirestore,
+  unescalateStoryInFirestore,
   updateCounselorNoteInFirestore,
   resolveStoryInFirestore,
   Student,
@@ -275,6 +277,10 @@ export default function App() {
     storiesList?: any[];
     title?: string;
   } | null>(null);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [copyReportSuccess, setCopyReportSuccess] = useState(false);
+  const [storyToDelete, setStoryToDelete] = useState<{ id: string; studentName: string; isFromBk?: boolean } | null>(null);
+  const [deleteNotification, setDeleteNotification] = useState<string>('');
 
   // Student Directory Filter & Capacity States (Supports 465+ Students)
   const [studentClassFilter, setStudentClassFilter] = useState('Semua');
@@ -286,7 +292,7 @@ export default function App() {
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentClass, setNewStudentClass] = useState('Kelas VII A');
   const [newStudentAvatar, setNewStudentAvatar] = useState('👦');
-  const [newStudentGuruWali, setNewStudentGuruWali] = useState('Ibu Rahma, S.Pd');
+  const [newStudentGuruWali, setNewStudentGuruWali] = useState('I Nyoman Gede Juwastra, S.Sn');
 
   // Teacher Authentication States
   const [currentTeacher, setCurrentTeacher] = useState<any>(() => {
@@ -370,7 +376,7 @@ export default function App() {
   const [adminNewStudentName, setAdminNewStudentName] = useState('');
   const [adminNewStudentClass, setAdminNewStudentClass] = useState('Kelas VII A');
   const [adminNewStudentAvatar, setAdminNewStudentAvatar] = useState('👦');
-  const [adminNewStudentGuruWali, setAdminNewStudentGuruWali] = useState('Ibu Rahma, S.Pd');
+  const [adminNewStudentGuruWali, setAdminNewStudentGuruWali] = useState('I Nyoman Gede Juwastra, S.Sn');
   const [adminStudentSuccessMsg, setAdminStudentSuccessMsg] = useState('');
 
   // Edit Teacher Modal State
@@ -385,7 +391,7 @@ export default function App() {
   const [editStudentName, setEditStudentName] = useState('');
   const [editStudentClass, setEditStudentClass] = useState('Kelas VII A');
   const [editStudentAvatar, setEditStudentAvatar] = useState('👦');
-  const [editStudentGuruWali, setEditStudentGuruWali] = useState('Ibu Rahma, S.Pd');
+  const [editStudentGuruWali, setEditStudentGuruWali] = useState('I Nyoman Gede Juwastra, S.Sn');
 
   // Initialize Real-time Firestore Subscriptions and Seeding
   useEffect(() => {
@@ -452,6 +458,30 @@ export default function App() {
       }
     });
   }, [students]);
+
+  // Ensure Guru BK Ni Made Medi Astuti, S.Pd., M.Pd is present in teachers collection
+  useEffect(() => {
+    if (teachers.length > 0) {
+      const hasBk = teachers.some(t => t.name.toLowerCase().includes('medi astuti') || t.class?.includes('BK'));
+      if (!hasBk) {
+        registerTeacherToFirestore({
+          name: 'Ni Made Medi Astuti, S.Pd., M.Pd',
+          email: 'mediastuti@cerdas.id',
+          password: 'password123',
+          class: 'Guru BK (Kelas VII - IX)'
+        });
+      }
+    }
+  }, [teachers]);
+
+  // Ensure Andi Prasetyo is removed from Guru BK referrals
+  useEffect(() => {
+    stories.forEach(st => {
+      if (st.studentName?.toLowerCase().includes('andi prasetyo') && st.escalated) {
+        unescalateStoryInFirestore(st.id);
+      }
+    });
+  }, [stories]);
 
   // Audio Recording Logic
   const startRecording = async () => {
@@ -700,7 +730,7 @@ export default function App() {
     }
   };
 
-  // Helper function to trigger report printing
+  // Helper function to trigger report printing and modal preview
   const handlePrintReport = (
     type: 'single_story' | 'class_summary' | 'counseling_report',
     story?: any,
@@ -713,10 +743,62 @@ export default function App() {
       storiesList,
       title: title || (type === 'single_story' ? 'LAPORAN INDIVIDUAL JURNAL REFLEKSI EMOSI' : type === 'class_summary' ? 'REKAPITULASI JURNAL EMOSI KELAS' : 'LAPORAN BIMBINGAN & KONSELING (BK)')
     });
+    setShowPrintModal(true);
     playTone(523, 'sine', 0.1);
-    setTimeout(() => {
-      window.print();
-    }, 200);
+    try {
+      setTimeout(() => {
+        window.print();
+      }, 350);
+    } catch (e) {
+      console.warn("window.print handled:", e);
+    }
+  };
+
+  // Helper function to copy formatted report text to clipboard
+  const handleCopyReportText = () => {
+    if (!printableData) return;
+    let text = `========================================================\n`;
+    text += `CERDAS - CERITA DIGITAL ANAK SEMPATIK\n`;
+    text += `${printableData.title}\n`;
+    text += `Tanggal: ${new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}\n`;
+    text += `Guru BK: Ni Made Medi Astuti, S.Pd., M.Pd (Kelas VII - IX)\n`;
+    text += `========================================================\n\n`;
+
+    if ((printableData.type === 'single_story' || printableData.type === 'counseling_report') && printableData.story) {
+      const s = printableData.story;
+      text += `Nama Siswa: ${s.studentName}\n`;
+      text += `Kelas/Wali: ${s.guruWali || 'Ibu Rahma, S.Pd'}\n`;
+      text += `Emosi: ${s.feeling} (Karakter: ${s.character || 'Giga'})\n`;
+      text += `Tanggal: ${new Date(s.timestamp).toLocaleString('id-ID')}\n\n`;
+      text += `[REFLEKSI 4F]\n`;
+      text += `1. FACT (Kejadian): ${s.fact}\n`;
+      text += `2. FEELING (Perasaan): ${s.feeling}\n`;
+      text += `3. FINDING (Pembelajaran): ${s.finding}\n`;
+      text += `4. FUTURE (Rencana Aksi): ${s.future}\n\n`;
+      if (s.guruNote) text += `Catatan Guru Wali: ${s.guruNote}\n`;
+      if (s.counselorNote) text += `Catatan Intervensi BK: ${s.counselorNote}\n`;
+      if (s.aiRecommendation) text += `Rekomendasi AI SPK: ${s.aiRecommendation}\n`;
+    } else if (printableData.storiesList) {
+      text += `Total Jurnal Kasus Terdata: ${printableData.storiesList.length}\n\n`;
+      printableData.storiesList.forEach((st, idx) => {
+        text += `${idx + 1}. ${st.studentName} | ${st.feeling} | ${new Date(st.timestamp).toLocaleDateString('id-ID')}\n`;
+        text += `   Peristiwa: ${st.fact}\n`;
+        text += `   Rencana: ${st.future}\n`;
+        if (st.counselorNote) text += `   Catatan Intervensi BK: ${st.counselorNote}\n`;
+        text += `   Status: ${st.status || 'Aktif'}\n\n`;
+      });
+    }
+
+    text += `\nMengetahui: Guru Wali Kelas\nMenyetujui: Ni Made Medi Astuti, S.Pd., M.Pd (Guru BK Kelas VII - IX)`;
+
+    try {
+      navigator.clipboard.writeText(text);
+      setCopyReportSuccess(true);
+      playTone(587.33, 'sine', 0.1);
+      setTimeout(() => setCopyReportSuccess(false), 2500);
+    } catch (e) {
+      console.error("Clipboard error:", e);
+    }
   };
 
   // Print Teacher Credentials (Single or All)
@@ -866,35 +948,25 @@ export default function App() {
   };
 
   // Delete individual story (for Guru Wali / BK / Admin)
-  const handleDeleteStory = async (storyId: string, studentName: string) => {
-    if (!window.confirm(`Apakah Anda yakin ingin MENGHAPUS cerita / jurnal refleksi milik "${studentName}" ini? Action ini tidak dapat dibatalkan.`)) {
-      return;
-    }
+  const handleDeleteStory = (storyId: string, studentName: string) => {
+    setStoryToDelete({ id: storyId, studentName, isFromBk: false });
+  };
 
-    try {
-      await deleteStoryFromFirestore(storyId);
-      if (activeStoryDetail?.id === storyId) {
-        setActiveStoryDetail(null);
-      }
-      playTone(220, 'triangle', 0.2);
-    } catch (err) {
-      console.error(err);
-      alert("Gagal menghapus cerita dari database.");
-    }
+  // Remove story from Guru BK portal (or delete)
+  const handleRemoveFromBk = (storyId: string, studentName: string) => {
+    setStoryToDelete({ id: storyId, studentName, isFromBk: true });
   };
 
   // Delete student and their story history
   const handleDeleteStudent = async (studentId: string, name: string) => {
-    if (!window.confirm(`Apakah Anda yakin ingin menghapus murid "${name}" beserta seluruh riwayat ceritanya?`)) {
-      return;
-    }
-
     try {
       await deleteStudentFromFirestore(studentId, stories);
       playTone(220, 'triangle', 0.2);
+      setDeleteNotification(`✅ Data murid "${name}" berhasil dihapus.`);
+      setTimeout(() => setDeleteNotification(''), 4000);
     } catch (err) {
       console.error(err);
-      alert("Gagal menghapus murid dari Firestore.");
+      alert("Gagal menghapus data murid.");
     }
   };
 
@@ -1365,7 +1437,9 @@ export default function App() {
             <div className="flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
               <User className="w-4 h-4 text-slate-500" />
               <span className="text-xs font-bold text-slate-700">
-                {role === 'guru_wali' ? (currentTeacher ? currentTeacher.name.split(' ')[0] : 'Guru Wali') : 'Guru BK'}
+                {role === 'guru_wali' 
+                  ? (currentTeacher ? currentTeacher.name.split(' ')[0] : 'Guru Wali') 
+                  : (currentBkUser === 'orang_tua' ? 'Orang Tua' : 'Ibu Medi Astuti (BK)')}
               </span>
             </div>
           )}
@@ -2999,9 +3073,17 @@ export default function App() {
             <div className="grid grid-cols-1 gap-6">
               {/* Option 1: Guru BK */}
               <div className="bg-emerald-50/50 border border-emerald-100 p-5 rounded-2xl flex flex-col gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">🩺</span>
-                  <h4 className="font-extrabold text-sm text-emerald-800">Masuk sebagai Guru BK</h4>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🩺</span>
+                    <div>
+                      <h4 className="font-extrabold text-sm text-emerald-800">Masuk sebagai Guru BK</h4>
+                      <p className="text-[11px] font-bold text-emerald-700">Ni Made Medi Astuti, S.Pd., M.Pd</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-200">
+                    Kelas VII - IX
+                  </span>
                 </div>
                 <form onSubmit={handleBkLogin} className="flex flex-col gap-2">
                   <input
@@ -3050,6 +3132,14 @@ export default function App() {
 
         {role === 'guru_bk' && currentBkUser && (
           <div className="flex flex-col gap-6 w-full animate-fade-in">
+            {deleteNotification && (
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold p-3 rounded-xl flex items-center justify-between shadow-sm animate-fade-in">
+                <span>{deleteNotification}</span>
+                <button type="button" onClick={() => setDeleteNotification('')} className="text-emerald-600 hover:text-emerald-900 ml-2">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
             {/* BK & Ortu Active Session Banner */}
             <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-3.5">
@@ -3058,11 +3148,11 @@ export default function App() {
                 </span>
                 <div>
                   <h3 className="font-extrabold text-slate-800 text-sm md:text-base">
-                    {currentBkUser === 'guru_bk' ? 'Portal Terpadu Guru BK' : 'Portal Informasi Orang Tua'}
+                    {currentBkUser === 'guru_bk' ? 'Portal Terpadu Guru BK (Kelas VII - IX)' : 'Portal Informasi Orang Tua'}
                   </h3>
                   <p className="text-xs text-slate-500">
                     {currentBkUser === 'guru_bk' 
-                      ? 'Selamat datang, Bapak/Ibu Guru BK. Akses tindakan intervensi, rekomendasi, dan riwayat bimbingan.' 
+                      ? 'Selamat datang, Ibu Ni Made Medi Astuti, S.Pd., M.Pd (Guru BK Kelas VII - IX). Akses tindakan intervensi, rekomendasi, dan riwayat bimbingan.' 
                       : 'Selamat datang, Bapak/Ibu Wali Murid. Anda dapat melihat perkembangan analisis emosi rujukan demi pendampingan di rumah.'}
                   </p>
                 </div>
@@ -3071,15 +3161,16 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
-                    const escalatedList = stories.filter(s => s.escalated);
+                    const escalatedList = stories.filter(s => s.escalated || s.status === 'Butuh Bantuan');
+                    const targetList = escalatedList.length > 0 ? escalatedList : stories;
                     handlePrintReport(
                       'class_summary',
                       undefined,
-                      escalatedList,
-                      'LAPORAN REKAPITULASI RUJUKAN & INTERVENSI BIMBINGAN KONSELING (BK)'
+                      targetList,
+                      'LAPORAN REKAPITULASI RUJUKAN & INTERVENSI BIMBINGAN KONSELING (BK) KELAS VII - IX'
                     );
                   }}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all"
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
                 >
                   <Printer className="w-4 h-4" /> Cetak Rekap Kasus BK
                 </button>
@@ -3111,39 +3202,62 @@ export default function App() {
 
                 <div className="flex flex-col gap-1.5">
                   {stories
-                    .filter(s => s.escalated)
+                    .filter(s => s.escalated && !s.studentName?.toLowerCase().includes('andi prasetyo'))
                     .filter(s => s.studentName.toLowerCase().includes(bkSearch.toLowerCase()))
                     .map((story) => {
-                      const char = CHARACTERS.find(c => c.id === story.character);
                       const isSelected = activeStoryDetail?.id === story.id;
                       return (
-                        <button
+                        <div
                           key={story.id}
-                          onClick={() => {
-                            setActiveStoryDetail(story);
-                            playTone(400, 'sine', 0.1);
-                          }}
-                          className={`flex items-center gap-3 w-full p-2.5 rounded-xl transition-all border text-left ${isSelected ? 'bg-emerald-600 border-emerald-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                          className={`flex items-center gap-1.5 w-full p-1.5 rounded-xl transition-all border ${
+                            isSelected
+                              ? 'bg-emerald-600 border-emerald-600 text-white shadow-md'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
                         >
-                          <span className="text-2xl bg-white/20 p-1 rounded-lg">
-                            {students.find(st => st.id === story.studentId)?.avatar || '👦'}
-                          </span>
-                          <div className="truncate flex-1">
-                            <div className="flex items-center justify-between">
-                              <p className="font-extrabold text-xs leading-tight">{story.studentName}</p>
-                              <span className={`text-[8px] px-1.5 py-0.5 rounded-full ${story.status === 'Teratasi' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                                {story.status}
-                              </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveStoryDetail(story);
+                              playTone(400, 'sine', 0.1);
+                            }}
+                            className="flex items-center gap-2.5 flex-1 min-w-0 text-left p-1 cursor-pointer"
+                          >
+                            <span className="text-2xl bg-white/20 p-1 rounded-lg">
+                              {students.find(st => st.id === story.studentId)?.avatar || '👦'}
+                            </span>
+                            <div className="truncate flex-1">
+                              <div className="flex items-center justify-between">
+                                <p className="font-extrabold text-xs leading-tight">{story.studentName}</p>
+                                <span className={`text-[8px] px-1.5 py-0.5 rounded-full ${story.status === 'Teratasi' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                                  {story.status}
+                                </span>
+                              </div>
+                              <p className={`text-[10px] truncate mt-0.5 ${isSelected ? 'text-white/80' : 'text-slate-500'}`}>
+                                Terakhir: {story.feeling} ({new Date(story.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })})
+                              </p>
                             </div>
-                            <p className={`text-[10px] truncate mt-0.5 ${isSelected ? 'text-white/80' : 'text-slate-500'}`}>
-                              Terakhir: {story.feeling} ({new Date(story.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })})
-                            </p>
-                          </div>
-                        </button>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveFromBk(story.id, story.studentName);
+                            }}
+                            className={`p-2 rounded-lg border transition-all flex items-center justify-center shrink-0 cursor-pointer ${
+                              isSelected
+                                ? 'bg-rose-500 hover:bg-rose-600 text-white border-rose-400'
+                                : 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200'
+                            }`}
+                            title={`Hapus rujukan ${story.studentName} dari portal BK`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       );
                     })}
 
-                  {stories.filter(s => s.escalated).length === 0 && (
+                  {stories.filter(s => s.escalated && !s.studentName?.toLowerCase().includes('andi prasetyo')).length === 0 && (
                     <div className="text-center py-8 text-slate-400 text-xs">
                       Tidak ada siswa rujukan aktif.
                     </div>
@@ -3168,7 +3282,12 @@ export default function App() {
                           <h3 className="font-black text-slate-800 text-lg">{activeStoryDetail.studentName}</h3>
                           <span className="bg-rose-100 text-rose-800 text-[9px] font-bold px-2 py-0.5 rounded-full">Rujukan BK</span>
                         </div>
-                        <p className="text-xs text-slate-500">Kelas 4A · Wali Kelas: Ibu Guru Rahma</p>
+                        <p className="text-xs text-slate-500">
+                          {(() => {
+                            const stObj = students.find(st => st.id === activeStoryDetail.studentId);
+                            return stObj ? `${stObj.class} · Wali Kelas: ${stObj.guruWali}` : 'Bimbingan Konseling Kelas VII - IX';
+                          })()}
+                        </p>
                         <p className="text-[10px] text-slate-400 mt-0.5">Tanggal Refleksi: {new Date(activeStoryDetail.timestamp).toLocaleString('id-ID')}</p>
                       </div>
                     </div>
@@ -3176,11 +3295,11 @@ export default function App() {
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => handleDeleteStory(activeStoryDetail.id, activeStoryDetail.studentName)}
-                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold text-xs rounded-xl border border-rose-200 shadow-sm flex items-center gap-1.5 transition-all"
-                        title="Hapus cerita/rujukan ini"
+                        onClick={() => handleRemoveFromBk(activeStoryDetail.id, activeStoryDetail.studentName)}
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold text-xs rounded-xl border border-rose-200 shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                        title="Hapus rujukan murid ini dari portal BK"
                       >
-                        <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Hapus Cerita
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Hapus Kasus BK
                       </button>
                       <button
                         type="button"
@@ -3192,7 +3311,7 @@ export default function App() {
                             `LAPORAN INTERVENSI KONSELING (BK) - ${activeStoryDetail.studentName}`
                           );
                         }}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all"
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
                       >
                         <Printer className="w-3.5 h-3.5" /> Cetak Rujukan BK PDF
                       </button>
@@ -3201,7 +3320,7 @@ export default function App() {
                         onChange={(e) => {
                           if (e.target.value === 'Teratasi') handleResolveStory(activeStoryDetail.id);
                         }}
-                        className="border border-slate-200 rounded-lg text-xs font-bold p-1.5 bg-white focus:outline-none"
+                        className="border border-slate-200 rounded-lg text-xs font-bold p-1.5 bg-white focus:outline-none cursor-pointer"
                       >
                         <option value="Butuh Bantuan">Butuh Bantuan Aktif</option>
                         <option value="Teratasi">Selesai / Teratasi</option>
@@ -4265,8 +4384,8 @@ export default function App() {
             <p className="font-bold text-slate-600">Menyetujui,</p>
             <p className="font-extrabold text-slate-800 mt-1">Guru Bimbingan Konseling (BK)</p>
             <div className="h-16"></div>
-            <p className="font-bold underline text-slate-900">Bapak I Sumayasa, M.Pd</p>
-            <p className="text-[10px] text-slate-500">NIP. 19850412 201001 1 002</p>
+            <p className="font-bold underline text-slate-900">Ni Made Medi Astuti, S.Pd., M.Pd</p>
+            <p className="text-[10px] text-slate-500">Guru Bimbingan Konseling (BK) Kelas VII - IX</p>
           </div>
         </div>
       </div>
@@ -4570,6 +4689,369 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PRATINJAU DOKUMEN CETAK & PDF RESMI */}
+      {showPrintModal && printableData && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-fade-in print:hidden">
+          <div className="bg-white rounded-3xl max-w-4xl w-full shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] overflow-hidden">
+            {/* Modal Top Control Bar */}
+            <div className="flex items-center justify-between p-4 px-6 border-b border-slate-200 bg-slate-50">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
+                  <Printer className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-slate-800">
+                    Pratinjau Dokumen Cetak Rekapitulasi
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Dokumen resmi SPK-CERDAS Bimbingan Konseling & Refleksi 4F
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyReportText}
+                  className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all border ${
+                    copyReportSuccess
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                  title="Salin teks laporan ke clipboard"
+                >
+                  {copyReportSuccess ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  {copyReportSuccess ? 'Tersalin!' : 'Salin Laporan'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      window.print();
+                    } catch (e) {
+                      console.warn(e);
+                    }
+                  }}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Buka dialog cetak browser atau simpan sebagai PDF"
+                >
+                  <Printer className="w-4 h-4" /> Cetak / PDF
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowPrintModal(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-full transition-colors ml-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body / Paper Sheet */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-100">
+              <div className="bg-white rounded-2xl p-6 sm:p-10 shadow-md border border-slate-200 max-w-3xl mx-auto font-sans text-slate-900">
+                {/* Kop Surat Resmi */}
+                <div className="border-b-4 border-slate-900 pb-4 mb-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+                  <div>
+                    <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-slate-900">
+                      CERDAS - CERITA DIGITAL ANAK SEMPATIK
+                    </h1>
+                    <p className="text-xs sm:text-sm font-bold text-slate-700">
+                      Sistem Pendukung Keputusan Dukungan Emosional & Kesehatan Mental Siswa
+                    </p>
+                    <p className="text-[11px] sm:text-xs text-slate-500">
+                      Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi - SMP Negeri Sempatik
+                    </p>
+                  </div>
+                  <div className="sm:text-right flex sm:flex-col items-center sm:items-end gap-2 sm:gap-0">
+                    <span className="text-xl sm:text-2xl font-black text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                      SPK-BK
+                    </span>
+                    <p className="text-[10px] text-slate-400 font-mono mt-1">Ref: {new Date().toLocaleDateString('id-ID')}</p>
+                  </div>
+                </div>
+
+                {/* Judul Dokumen */}
+                <div className="text-center my-6">
+                  <h2 className="text-base sm:text-lg font-black uppercase underline tracking-wide text-slate-900">
+                    {printableData.title}
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1 font-medium">
+                    Tanggal Terbit: {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                  </p>
+                  <p className="text-xs font-bold text-emerald-800 mt-0.5">
+                    Guru Bimbingan Konseling (BK): Ni Made Medi Astuti, S.Pd., M.Pd (Kelas VII - IX)
+                  </p>
+                </div>
+
+                {/* Single Story Printout */}
+                {(printableData.type === 'single_story' || printableData.type === 'counseling_report') && printableData.story && (
+                  <div className="flex flex-col gap-5 text-xs">
+                    {/* Student Metadata */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 bg-slate-50 p-4 rounded-xl border border-slate-300">
+                      <div>
+                        <p className="font-bold text-slate-500 uppercase text-[10px]">Nama Siswa:</p>
+                        <p className="text-sm font-extrabold text-slate-900">{printableData.story.studentName}</p>
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-500 uppercase text-[10px]">Guru Wali Pengampu:</p>
+                        <p className="text-sm font-extrabold text-slate-900">{printableData.story.guruWali || 'Ibu Rahma, S.Pd'}</p>
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-500 uppercase text-[10px]">Tanggal Refleksi:</p>
+                        <p className="font-bold text-slate-800">{new Date(printableData.story.timestamp).toLocaleString('id-ID')}</p>
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-500 uppercase text-[10px]">Perasaan & Karakter Emosi:</p>
+                        <p className="font-bold text-slate-800">{printableData.story.feeling} (Karakter: {printableData.story.character || 'Giga'})</p>
+                      </div>
+                    </div>
+
+                    {/* 4F Content Table */}
+                    <table className="w-full border-collapse border border-slate-300 text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 text-left">
+                          <th className="border border-slate-300 p-2.5 font-bold uppercase w-1/3">Elemen Refleksi 4F</th>
+                          <th className="border border-slate-300 p-2.5 font-bold uppercase">Detail Catatan Siswa</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td className="border border-slate-300 p-2.5 font-bold bg-slate-50">1. FACT (Kejadian)</td>
+                          <td className="border border-slate-300 p-2.5 leading-relaxed">{printableData.story.fact}</td>
+                        </tr>
+                        <tr>
+                          <td className="border border-slate-300 p-2.5 font-bold bg-slate-50">2. FEELING (Perasaan)</td>
+                          <td className="border border-slate-300 p-2.5 leading-relaxed">{printableData.story.feeling}</td>
+                        </tr>
+                        <tr>
+                          <td className="border border-slate-300 p-2.5 font-bold bg-slate-50">3. FINDING (Pembelajaran)</td>
+                          <td className="border border-slate-300 p-2.5 leading-relaxed">{printableData.story.finding}</td>
+                        </tr>
+                        <tr>
+                          <td className="border border-slate-300 p-2.5 font-bold bg-slate-50">4. FUTURE (Rencana Aksi)</td>
+                          <td className="border border-slate-300 p-2.5 leading-relaxed">{printableData.story.future}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* Response Section */}
+                    <div className="border border-slate-300 p-4 rounded-xl bg-slate-50 flex flex-col gap-3">
+                      <div>
+                        <p className="font-bold text-slate-700 uppercase text-[10px]">Tanggapan & Pendampingan Guru Wali:</p>
+                        <p className="text-xs text-slate-800 italic mt-0.5">{printableData.story.guruNote || printableData.story.teacherResponse || 'Belum ada catatan tanggapan.'}</p>
+                      </div>
+                      <div>
+                        <p className="font-bold text-emerald-800 uppercase text-[10px]">Catatan Intervensi Bimbingan Konseling (BK):</p>
+                        <p className="text-xs text-emerald-900 italic mt-0.5">{printableData.story.counselorNote || 'Dalam penanganan bimbingan dan intervensi suportif.'}</p>
+                      </div>
+                      {printableData.story.aiRecommendation && (
+                        <div>
+                          <p className="font-bold text-sky-800 uppercase text-[10px]">Rekomendasi Keputusan AI (SPK Decision Support):</p>
+                          <p className="text-xs text-sky-900 italic mt-0.5">{printableData.story.aiRecommendation}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Class / BK Summary Printout */}
+                {printableData.type === 'class_summary' && printableData.storiesList && (
+                  <div className="flex flex-col gap-4 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2 bg-emerald-50/70 p-3 rounded-xl border border-emerald-200">
+                      <div>
+                        <span className="font-bold text-emerald-900">Total Kasus Terdata: </span>
+                        <span className="font-black text-emerald-800">{printableData.storiesList.length} Berkas Kasus</span>
+                      </div>
+                      <div className="text-[11px] text-emerald-700 font-semibold">
+                        Wilayah Bimbingan: Seluruh Kelas VII, VIII, dan IX
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse border border-slate-300 text-[11px]">
+                        <thead>
+                          <tr className="bg-slate-100 text-left">
+                            <th className="border border-slate-300 p-2 font-bold text-center w-8">No</th>
+                            <th className="border border-slate-300 p-2 font-bold">Nama Murid</th>
+                            <th className="border border-slate-300 p-2 font-bold">Tgl</th>
+                            <th className="border border-slate-300 p-2 font-bold">Emosi</th>
+                            <th className="border border-slate-300 p-2 font-bold">Peristiwa (Fact)</th>
+                            <th className="border border-slate-300 p-2 font-bold">Catatan Intervensi BK</th>
+                            <th className="border border-slate-300 p-2 font-bold">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {printableData.storiesList.map((st, idx) => (
+                            <tr key={st.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
+                              <td className="border border-slate-300 p-2 text-center font-bold">{idx + 1}</td>
+                              <td className="border border-slate-300 p-2 font-bold text-slate-800">{st.studentName}</td>
+                              <td className="border border-slate-300 p-2 whitespace-nowrap text-[10px] text-slate-600">
+                                {new Date(st.timestamp).toLocaleDateString('id-ID')}
+                              </td>
+                              <td className="border border-slate-300 p-2 font-bold">
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-[10px]">
+                                  {st.feeling}
+                                </span>
+                              </td>
+                              <td className="border border-slate-300 p-2 leading-tight text-slate-700 max-w-[200px]">
+                                {st.fact}
+                              </td>
+                              <td className="border border-slate-300 p-2 leading-tight text-emerald-800 italic max-w-[220px]">
+                                {st.counselorNote || 'Dalam penanganan sesi bimbingan & intervensi suportif.'}
+                              </td>
+                              <td className="border border-slate-300 p-2 font-bold">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap ${
+                                  st.status === 'Butuh Bantuan' ? 'bg-rose-100 text-rose-700 font-extrabold' : 'bg-emerald-100 text-emerald-800'
+                                }`}>
+                                  {st.status || 'Aktif'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Signatures */}
+                <div className="grid grid-cols-2 gap-8 mt-12 pt-6 text-center text-xs border-t border-slate-200">
+                  <div>
+                    <p className="font-bold text-slate-600">Mengetahui,</p>
+                    <p className="font-extrabold text-slate-800 mt-1">Guru Wali Kelas</p>
+                    <div className="h-16"></div>
+                    <p className="font-bold underline text-slate-900">{currentTeacher ? currentTeacher.name : 'Guru Pengampu / Wali'}</p>
+                    <p className="text-[10px] text-slate-500">NIP. 19880315 201202 2 004</p>
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-600">Menyetujui,</p>
+                    <p className="font-extrabold text-slate-800 mt-1">Guru Bimbingan Konseling (BK)</p>
+                    <div className="h-16"></div>
+                    <p className="font-bold underline text-slate-900">Ni Made Medi Astuti, S.Pd., M.Pd</p>
+                    <p className="text-[10px] text-slate-500">Guru Bimbingan Konseling (BK) Kelas VII - IX</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Bottom Action Bar */}
+            <div className="p-4 px-6 border-t border-slate-200 bg-white flex flex-col sm:flex-row items-center justify-between gap-3">
+              <span className="text-xs text-slate-500 text-center sm:text-left">
+                💡 Dokumen dapat dicetak ke printer fisik, disimpan sebagai PDF, atau disalin dalam format teks.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPrintModal(false)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl font-bold text-xs text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  Tutup Pratinjau
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      window.print();
+                    } catch (e) {
+                      console.warn(e);
+                    }
+                  }}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" /> Cetak Sekarang / Simpan PDF
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KONFIRMASI HAPUS CERITA / RUJUKAN BK */}
+      {storyToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in print:hidden">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200 flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <span className="p-3 bg-rose-100 text-rose-600 rounded-2xl">
+                <Trash2 className="w-6 h-6" />
+              </span>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  {storyToDelete.isFromBk ? 'Hapus Rujukan dari Portal Guru BK' : 'Hapus Cerita / Jurnal Murid'}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Murid: <span className="font-bold text-slate-800">{storyToDelete.studentName}</span>
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-200">
+              {storyToDelete.isFromBk 
+                ? `Apakah Anda ingin menghapus kasus rujukan murid "${storyToDelete.studentName}" dari daftar pantauan Guru BK?`
+                : `Apakah Anda yakin ingin menghapus data jurnal refleksi ini dari database?`}
+            </p>
+
+            <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+              {storyToDelete.isFromBk && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await unescalateStoryInFirestore(storyToDelete.id);
+                      if (activeStoryDetail?.id === storyToDelete.id) {
+                        setActiveStoryDetail(null);
+                      }
+                      playTone(523, 'sine', 0.15);
+                      setDeleteNotification(`✅ Kasus rujukan murid "${storyToDelete.studentName}" berhasil dihapus dari Portal Guru BK!`);
+                      setTimeout(() => setDeleteNotification(''), 4000);
+                    } catch (e) {
+                      console.error(e);
+                    } finally {
+                      setStoryToDelete(null);
+                    }
+                  }}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  ✓ Hapus dari Daftar BK Saja (Selesai Bimbingan)
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await deleteStoryFromFirestore(storyToDelete.id);
+                    if (activeStoryDetail?.id === storyToDelete.id) {
+                      setActiveStoryDetail(null);
+                    }
+                    playTone(220, 'triangle', 0.2);
+                    setDeleteNotification(`🗑️ Berkas murid "${storyToDelete.studentName}" berhasil dihapus permanen.`);
+                    setTimeout(() => setDeleteNotification(''), 4000);
+                  } catch (e) {
+                    console.error(e);
+                  } finally {
+                    setStoryToDelete(null);
+                  }
+                }}
+                className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" /> Hapus Cerita / Berkas Permanen
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStoryToDelete(null)}
+                className="w-full py-2 text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+            </div>
           </div>
         </div>
       )}
