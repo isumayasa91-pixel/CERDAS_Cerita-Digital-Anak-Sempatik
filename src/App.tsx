@@ -1984,6 +1984,15 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* Privacy Notice */}
+                      <div className="bg-sky-50 border border-sky-200 p-4 rounded-2xl flex items-center gap-3 text-xs text-sky-900 shadow-sm">
+                        <span className="text-2xl">🔒</span>
+                        <div>
+                          <strong className="font-extrabold text-sky-950 block mb-0.5">Ruang Aman & Kerahasiaan Terjamin</strong>
+                          Semua cerita, refleksi, dan nilai yang kamu tulis di sini aman serta bersifat rahasia. Teman lain tidak dapat membuka atau melihat catatanmu. Hanya kamu dan Guru Wali/BK yang memiliki akses.
+                        </div>
+                      </div>
+
                       {/* Fresh Notification / Inbox from Teacher */}
                       {studentStories.some(s => s.teacherResponse) && (
                         <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-200 rounded-2xl p-5 shadow-sm">
