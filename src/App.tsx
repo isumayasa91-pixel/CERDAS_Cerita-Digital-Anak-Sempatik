@@ -323,7 +323,7 @@ export default function App() {
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentClass, setNewStudentClass] = useState('Kelas VII A');
   const [newStudentAvatar, setNewStudentAvatar] = useState('👦');
-  const [newStudentGuruWali, setNewStudentGuruWali] = useState('I Nyoman Gede Juwastra, S.Sn');
+  const [newStudentGuruWali, setNewStudentGuruWali] = useState('I Wayan Sumayasa, S.Pd');
 
   // Teacher Authentication States
   const [currentTeacher, setCurrentTeacher] = useState<any>(() => {
@@ -411,7 +411,7 @@ export default function App() {
   const [adminNewStudentName, setAdminNewStudentName] = useState('');
   const [adminNewStudentClass, setAdminNewStudentClass] = useState('Kelas VII A');
   const [adminNewStudentAvatar, setAdminNewStudentAvatar] = useState('👦');
-  const [adminNewStudentGuruWali, setAdminNewStudentGuruWali] = useState('I Nyoman Gede Juwastra, S.Sn');
+  const [adminNewStudentGuruWali, setAdminNewStudentGuruWali] = useState('I Wayan Sumayasa, S.Pd');
   const [adminStudentSuccessMsg, setAdminStudentSuccessMsg] = useState('');
 
   // Edit Teacher Modal State
@@ -434,7 +434,7 @@ export default function App() {
   const [editStudentName, setEditStudentName] = useState('');
   const [editStudentClass, setEditStudentClass] = useState('Kelas VII A');
   const [editStudentAvatar, setEditStudentAvatar] = useState('👦');
-  const [editStudentGuruWali, setEditStudentGuruWali] = useState('I Nyoman Gede Juwastra, S.Sn');
+  const [editStudentGuruWali, setEditStudentGuruWali] = useState('I Wayan Sumayasa, S.Pd');
 
   // Initialize Real-time Firestore Subscriptions and Seeding
   useEffect(() => {
@@ -1486,7 +1486,7 @@ export default function App() {
     setEditStudentName(student.name);
     setEditStudentClass(student.class);
     setEditStudentAvatar(student.avatar || '👦');
-    setEditStudentGuruWali(student.guruWali || 'Ibu Rahma, S.Pd');
+    setEditStudentGuruWali(student.guruWali || 'I Wayan Sumayasa, S.Pd');
     playTone(440, 'sine', 0.1);
   };
 
@@ -1557,44 +1557,63 @@ export default function App() {
   };
 
   // Filtered lists for the active teacher (Guru Wali)
+  // Helper to normalize teacher names for clean and exact matching
+  const normalizeTeacherName = (name: string): string => {
+    return (name || '')
+      .toLowerCase()
+      .replace(/\b(bapak|ibu|pak|bu)\b/gi, '')
+      .replace(/,\s*(s\.pd\.b|s\.pd|m\.pd|s\.sn|kons|s\.ag|m\.si|s\.kom)\b/gi, '')
+      .replace(/\b(s\.pd\.b|s\.pd|m\.pd|s\.sn|kons|s\.ag|m\.si|s\.kom)\b/gi, '')
+      .replace(/[.,\-_]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const isTeacherNameMatch = (studentGuru: string | undefined, teacherName: string | undefined): boolean => {
+    if (!studentGuru || !teacherName) return false;
+    const sClean = normalizeTeacherName(studentGuru);
+    const tClean = normalizeTeacherName(teacherName);
+    
+    if (!sClean || !tClean) return false;
+    if (sClean === tClean) return true;
+
+    // Filter out common Balinese birth-order names to find specific personal names
+    const stopWords = ['gede', 'made', 'ketut', 'wayan', 'nyoman', 'ayu'];
+    const sWords = sClean.split(' ').filter(w => w.length > 2 && !stopWords.includes(w));
+    const tWords = tClean.split(' ').filter(w => w.length > 2 && !stopWords.includes(w));
+
+    if (sWords.length > 0 && tWords.length > 0) {
+      const hasDistinctMatch = sWords.some(w => tWords.includes(w));
+      if (hasDistinctMatch) return true;
+    }
+
+    if (sClean.includes(tClean) || tClean.includes(sClean)) {
+      return true;
+    }
+
+    return false;
+  };
+
   const isStudentForTeacher = (st: any, filterName: string) => {
     if (!st) return false;
     if (filterName === 'Semua' || teacherViewScope === 'all') return true;
-
-    const stGuru = (st.guruWali || '').trim().toLowerCase();
-    const targetName = filterName.trim().toLowerCase();
 
     // Guru BK or Umum can view all students
     if (currentTeacher?.class === 'Umum' || currentTeacher?.class?.toLowerCase().includes('bk')) {
       return true;
     }
 
-    const targetTeacher = teachers.find(t => t.name.toLowerCase() === targetName || t.name.toLowerCase().includes(targetName) || targetName.includes(t.name.toLowerCase())) || 
-                          (currentTeacher && (currentTeacher.name.toLowerCase() === targetName || currentTeacher.name.toLowerCase().includes(targetName) || targetName.includes(currentTeacher.name.toLowerCase())) ? currentTeacher : null);
-
-    if (targetTeacher) {
-      const teacherNameLower = targetTeacher.name.toLowerCase();
-      // Match by assigned guruWali
-      if (stGuru && stGuru === teacherNameLower) {
-        return true;
-      }
-
-      // Match by class
-      if (targetTeacher.class) {
-        const teacherClassLower = targetTeacher.class.toLowerCase();
-        const studentClassLower = (st.class || '').toLowerCase();
-        const studentClean = studentClassLower.replace('kelas', '').trim();
-        const teacherClean = teacherClassLower.replace('kelas', '').trim();
-        if (teacherClassLower.includes(studentClassLower) || studentClassLower.includes(teacherClassLower) || 
-            (studentClean && teacherClean && (teacherClean.includes(studentClean) || studentClean.includes(teacherClean)))) {
-          return true;
-        }
-      }
+    // STRICT MATCH: Only match students who registered this teacher as their guruWali at the beginning
+    if (st.guruWali && st.guruWali !== 'Belum dipilih') {
+      return isTeacherNameMatch(st.guruWali, filterName);
     }
 
-    if (targetName.includes('sumayasa')) {
-      if (stGuru && (stGuru.includes('sumayasa') || stGuru.includes('i wayan'))) return true;
-      if (st.class && (st.class.startsWith('Kelas VIII') || st.class.startsWith('Kelas IX') || st.class.startsWith('Kelas VII'))) return true;
+    // Only if student has no guruWali recorded, fallback to class
+    const targetTeacher = teachers.find(t => isTeacherNameMatch(t.name, filterName)) || currentTeacher;
+    if (targetTeacher && targetTeacher.class && !targetTeacher.class.includes('BK') && targetTeacher.class !== 'Umum') {
+      const teacherClasses = targetTeacher.class.split(',').map((c: string) => c.trim().toLowerCase());
+      const studentClass = (st.class || '').trim().toLowerCase();
+      return teacherClasses.includes(studentClass);
     }
 
     return false;
@@ -1609,35 +1628,17 @@ export default function App() {
       return true;
     }
 
-    const filterLower = filterName.toLowerCase();
-    const storyGuru = (story.guruWali || '').toLowerCase();
-
-    // 1. Direct match by story.guruWali
-    if (storyGuru) {
-      if (storyGuru.includes(filterLower) || filterLower.includes(storyGuru)) {
-        return true;
-      }
-      if (filterLower.includes('sumayasa') && (storyGuru.includes('sumayasa') || storyGuru.includes('i wayan'))) {
-        return true;
-      }
+    // 1. Direct match by story.guruWali if explicitly recorded
+    if (story.guruWali && story.guruWali !== 'Belum dipilih') {
+      return isTeacherNameMatch(story.guruWali, filterName);
     }
 
     // 2. Lookup student by ID or studentName
     const student = students.find(st => st.id === story.studentId) ||
-                    students.find(st => st.name?.toLowerCase().trim() === (story.studentName || '').toLowerCase().trim());
+                    students.find(st => (st.name || '').toLowerCase().trim() === (story.studentName || '').toLowerCase().trim());
 
     if (student) {
       return isStudentForTeacher(student, filterName);
-    }
-
-    // 3. Match if story studentName is in teacherStudents
-    if (teacherStudents.some(st => st.name.toLowerCase().trim() === (story.studentName || '').toLowerCase().trim())) {
-      return true;
-    }
-
-    // 4. Default for Sumayasa account
-    if (filterLower.includes('sumayasa')) {
-      return true;
     }
 
     return false;
@@ -3412,7 +3413,7 @@ export default function App() {
                     required
                     value={authName}
                     onChange={(e) => setAuthName(e.target.value)}
-                    placeholder="Contoh: Bapak I Sumayasa, M.Pd"
+                    placeholder="Contoh: I Wayan Sumayasa, S.Pd"
                     className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white text-xs font-medium focus:outline-none focus:border-sky-500"
                   />
                 </div>
@@ -3654,7 +3655,7 @@ export default function App() {
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                    <span>🎯</span> Pantauan Emosi Murid ({teacherStudents.length})
+                    <span>🎯</span> Pantauan Emosi Harian Murid ({teacherStudents.length})
                   </h3>
                   <button
                     type="button"
@@ -3670,7 +3671,16 @@ export default function App() {
                   </button>
                 </div>
                 <div className="flex flex-col gap-2">
-                  {teacherStudents.map((st) => {
+                  {teacherStudents.length === 0 ? (
+                    <div className="text-center py-8 px-4 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
+                      <p className="text-2xl mb-1">👩‍🏫</p>
+                      <p className="text-xs font-bold text-slate-700">Belum Ada Murid Binaan</p>
+                      <p className="text-[11px] text-slate-500 mt-1 max-w-xs mx-auto">
+                        Hanya murid yang memilih <strong>{currentTeacher?.name}</strong> sebagai Guru Wali saat mendaftar yang akan muncul di daftar pantauan ini.
+                      </p>
+                    </div>
+                  ) : (
+                    teacherStudents.map((st) => {
                     const stStory = teacherStories.find(s => s.studentId === st.id);
                     const lastChar = stStory ? CHARACTERS.find(c => c.id === stStory.character) : null;
                     
@@ -3730,7 +3740,7 @@ export default function App() {
                         </div>
                       </div>
                     );
-                  })}
+                  }))}
                 </div>
               </div>
 
@@ -4762,7 +4772,7 @@ export default function App() {
                         required
                         value={adminNewTeacherName}
                         onChange={(e) => setAdminNewTeacherName(e.target.value)}
-                        placeholder="Contoh: Bapak I Sumayasa, M.Pd"
+                        placeholder="Contoh: I Wayan Sumayasa, S.Pd"
                         className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:border-rose-500 font-medium"
                       />
                     </div>
@@ -5333,10 +5343,10 @@ export default function App() {
                         setNewStudentGuruWali(matched.name);
                       } else {
                         const fallbackGuru = 
-                          cls === 'Kelas VII A' ? 'I Nyoman Gede Juwastra, S.Sn' :
+                          cls === 'Kelas VII A' ? 'I Wayan Sumayasa, S.Pd' :
                           cls.startsWith('Kelas VIII') ? 'I Wayan Sumayasa, S.Pd' :
                           cls.startsWith('Kelas IX') ? 'Ni Luh Ayu Evalentin, S.Pd' :
-                          cls.startsWith('Kelas VII') ? 'I Nyoman Gede Juwastra, S.Sn' : 'I Wayan Sumayasa, S.Pd';
+                          cls.startsWith('Kelas VII') ? 'I Wayan Sumayasa, S.Pd' : 'I Wayan Sumayasa, S.Pd';
                         setNewStudentGuruWali(fallbackGuru);
                       }
                     }}

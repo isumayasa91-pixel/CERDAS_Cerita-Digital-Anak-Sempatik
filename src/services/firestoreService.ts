@@ -58,7 +58,7 @@ const DEFAULT_STUDENTS: Student[] = [];
 const DEFAULT_TEACHERS: Teacher[] = [
   { id: 't-1', name: 'I Nyoman Gede Juwastra, S.Sn', email: 'nyoman@cerdas.id', password: 'password123', class: 'Kelas VII A', createdAt: new Date().toISOString() },
   { id: 't-2', name: 'Ibu Rahma, S.Pd', email: 'rahma@cerdas.id', password: 'password123', class: 'Kelas VII B', createdAt: new Date().toISOString() },
-  { id: 't-3', name: 'Bapak I Sumayasa, M.Pd', email: 'isumayasa91@guru.smp.belajar.id', password: 'password123', class: 'Kelas VIII A', createdAt: new Date().toISOString() },
+  { id: 't-3', name: 'I Wayan Sumayasa, S.Pd', email: 'isumayasa91@guru.smp.belajar.id', password: 'password123', class: 'Kelas VIII A', createdAt: new Date().toISOString() },
   { id: 't-4', name: 'Bapak Deni Saputra, S.Pd', email: 'deni@cerdas.id', password: 'password123', class: 'Kelas IX A', createdAt: new Date().toISOString() },
   { id: 't-bk', name: 'Ni Made Medi Astuti, S.Pd., M.Pd', email: 'mediastuti@cerdas.id', password: 'password123', class: 'Guru BK (Kelas VII - IX)', createdAt: new Date().toISOString() },
   { id: 't-5', name: 'Ibu Sri Wahyuni, S.Pd', email: 'sri@cerdas.id', password: 'password123', class: 'Umum', createdAt: new Date().toISOString() },
@@ -100,11 +100,11 @@ export async function seedFullRoster465StudentsToFirestore(): Promise<number> {
     { name: 'Kelas VII D', guru: 'Ibu Rahma, S.Pd' },
     { name: 'Kelas VII E', guru: 'Ibu Rahma, S.Pd' },
 
-    { name: 'Kelas VIII A', guru: 'Bapak I Sumayasa, M.Pd' },
-    { name: 'Kelas VIII B', guru: 'Bapak I Sumayasa, M.Pd' },
-    { name: 'Kelas VIII C', guru: 'Bapak I Sumayasa, M.Pd' },
-    { name: 'Kelas VIII D', guru: 'Bapak I Sumayasa, M.Pd' },
-    { name: 'Kelas VIII E', guru: 'Bapak I Sumayasa, M.Pd' },
+    { name: 'Kelas VIII A', guru: 'I Wayan Sumayasa, S.Pd' },
+    { name: 'Kelas VIII B', guru: 'I Wayan Sumayasa, S.Pd' },
+    { name: 'Kelas VIII C', guru: 'I Wayan Sumayasa, S.Pd' },
+    { name: 'Kelas VIII D', guru: 'I Wayan Sumayasa, S.Pd' },
+    { name: 'Kelas VIII E', guru: 'I Wayan Sumayasa, S.Pd' },
 
     { name: 'Kelas IX A', guru: 'Bapak Deni Saputra, S.Pd' },
     { name: 'Kelas IX B', guru: 'Bapak Deni Saputra, S.Pd' },
@@ -425,8 +425,8 @@ export async function addStudentToFirestore(studentData: { name: string; class: 
   const id = `student-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
   const expectedGuru = studentData.class === 'Kelas VII A' ? 'I Nyoman Gede Juwastra, S.Sn' :
                        studentData.class.startsWith('Kelas VII') ? 'Ibu Rahma, S.Pd' :
-                       studentData.class.startsWith('Kelas VIII') ? 'Bapak I Sumayasa, M.Pd' :
-                       studentData.class.startsWith('Kelas IX') ? 'Bapak Deni Saputra, S.Pd' : 'Bapak I Sumayasa, M.Pd';
+                       studentData.class.startsWith('Kelas VIII') ? 'I Wayan Sumayasa, S.Pd' :
+                       studentData.class.startsWith('Kelas IX') ? 'Bapak Deni Saputra, S.Pd' : 'I Wayan Sumayasa, S.Pd';
   const newStudent: Student = {
     id,
     name: studentData.name,
