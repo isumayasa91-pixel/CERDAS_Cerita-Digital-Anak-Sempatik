@@ -55,6 +55,7 @@ import {
   markStudentDeletedLocally,
   deleteStoryFromFirestore,
   updateStudentInFirestore,
+  saveCustomStudentLocally,
   registerTeacherToFirestore,
   deleteTeacherFromFirestore,
   markTeacherDeletedLocally,
@@ -1524,6 +1525,7 @@ export default function App() {
     showToast(`✅ Profil Murid "${trimmedName}" berhasil diperbarui dan disimpan!`);
 
     // 2. Async sync
+    saveCustomStudentLocally(updatedStudent);
     try {
       await updateStudentInFirestore(editingStudent.id, {
         name: trimmedName,
