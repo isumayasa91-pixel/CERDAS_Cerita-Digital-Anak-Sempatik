@@ -48,6 +48,8 @@ export interface Story {
   escalated?: boolean;
   status?: string;
   aiRecommendation?: string;
+  score?: number;
+  attendance?: string;
 }
 
 const DEFAULT_STUDENTS: Student[] = [];
@@ -358,13 +360,20 @@ export async function updateTeacherInFirestore(teacherId: string, updates: Parti
 }
 
 // Update Guru Note on Story
-export async function updateGuruNoteInFirestore(storyId: string, guruNote: string) {
+export async function updateGuruNoteInFirestore(storyId: string, guruNote: string, score?: number, attendance?: string) {
   try {
     const ref = doc(db, 'stories', storyId);
-    await updateDoc(ref, {
+    const updates: any = {
       guruNote,
       status: 'Selesai Direfleksi'
-    });
+    };
+    if (score !== undefined) {
+      updates.score = score;
+    }
+    if (attendance) {
+      updates.attendance = attendance;
+    }
+    await updateDoc(ref, updates);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `stories/${storyId}`);
     throw error;

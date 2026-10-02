@@ -268,6 +268,9 @@ export default function App() {
   const [customEscalateNote, setCustomEscalateNote] = useState('');
   const [showEscalateModal, setShowEscalateModal] = useState(false);
   const [activeGuruWaliFilter, setActiveGuruWaliFilter] = useState<string>('Semua');
+  const [teacherScoreInput, setTeacherScoreInput] = useState<string>('85');
+  const [teacherAttendanceInput, setTeacherAttendanceInput] = useState<string>('Hadir');
+  const [activeTeacherTab, setActiveTeacherTab] = useState<'stories' | 'grades_attendance'>('stories');
 
   // Guru BK & Orang Tua dashboard state
   const [bkSearch, setBkSearch] = useState('');
@@ -771,13 +774,16 @@ export default function App() {
       return;
     }
 
+    const scoreNum = parseInt(teacherScoreInput, 10);
+    const finalScore = isNaN(scoreNum) ? 85 : Math.min(100, Math.max(0, scoreNum));
+
     try {
-      await updateGuruNoteInFirestore(storyId, teacherReplyText.trim());
+      await updateGuruNoteInFirestore(storyId, teacherReplyText.trim(), finalScore, teacherAttendanceInput);
       setTeacherReplyText('');
       playTone(523.25, 'sine', 0.2);
     } catch (err) {
       console.error(err);
-      alert("Gagal menyimpan tanggapan.");
+      alert("Gagal menyimpan tanggapan dan nilai.");
     }
   };
 
@@ -3254,7 +3260,24 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Teacher Tab Navigation */}
+            <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+              <button
+                onClick={() => { setActiveTeacherTab('stories'); playTone(400, 'sine', 0.1); }}
+                className={`px-4 py-2.5 rounded-xl font-extrabold text-xs transition-all flex items-center gap-2 cursor-pointer ${activeTeacherTab === 'stories' ? 'bg-sky-600 text-white shadow-md' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+              >
+                <span>📖</span> Jurnal & Tanggapan Cerita
+              </button>
+              <button
+                onClick={() => { setActiveTeacherTab('grades_attendance'); playTone(440, 'sine', 0.1); }}
+                className={`px-4 py-2.5 rounded-xl font-extrabold text-xs transition-all flex items-center gap-2 cursor-pointer ${activeTeacherTab === 'grades_attendance' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+              >
+                <span>📊</span> Rekap Nilai & Absensi Pertemuan Cerdas
+              </button>
+            </div>
+
+            {activeTeacherTab === 'stories' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             
             {/* LEFT COLUMN: Class statistics & Student Mood Rings */}
             <div className="lg:col-span-4 flex flex-col gap-6">
@@ -3542,14 +3565,40 @@ export default function App() {
                               {/* Form Reply Panel */}
                               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-3">
                                 <h5 className="font-extrabold text-xs text-indigo-700 uppercase tracking-wider border-b border-slate-100 pb-2">
-                                  📝 Tulis Tanggapan Hangat Anda ke Murid
+                                  📝 Tulis Tanggapan, Nilai & Absensi Pertemuan Cerdas
                                 </h5>
-                                <div className="flex flex-col gap-2">
+                                <div className="flex flex-col gap-2.5">
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div className="flex flex-col gap-1">
+                                      <label className="text-[11px] font-extrabold text-slate-700">Skor / Nilai (0-100):</label>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        value={teacherScoreInput}
+                                        onChange={(e) => setTeacherScoreInput(e.target.value)}
+                                        className="px-3 py-2 text-xs border border-slate-200 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-indigo-500 bg-white"
+                                      />
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                      <label className="text-[11px] font-extrabold text-slate-700">Absensi Pertemuan:</label>
+                                      <select
+                                        value={teacherAttendanceInput}
+                                        onChange={(e) => setTeacherAttendanceInput(e.target.value)}
+                                        className="px-3 py-2 text-xs border border-slate-200 rounded-lg font-bold text-slate-700 focus:outline-none focus:border-indigo-500 bg-white"
+                                      >
+                                        <option value="Hadir">Hadir (Pertemuan Cerdas)</option>
+                                        <option value="Izin">Izin</option>
+                                        <option value="Sakit">Sakit</option>
+                                        <option value="Alpha">Alpha</option>
+                                      </select>
+                                    </div>
+                                  </div>
                                   <textarea
                                     value={teacherReplyText}
                                     onChange={(e) => setTeacherReplyText(e.target.value)}
                                     placeholder="Ketik tanggapan yang menenangkan emosi murid..."
-                                    className="w-full h-24 p-3 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 leading-relaxed"
+                                    className="w-full h-24 p-3 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 leading-relaxed bg-white"
                                   />
                                   <div className="flex gap-2">
                                     <button
@@ -3612,7 +3661,83 @@ export default function App() {
 
             </div>
 
-          </div>
+            </div>
+            )}
+
+            {activeTeacherTab === 'grades_attendance' && (
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col gap-6 animate-fade-in w-full">
+                <div className="flex flex-col md:flex-row items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                  <div>
+                    <h3 className="font-extrabold text-slate-800 text-base md:text-lg flex items-center gap-2">
+                      <span>📊</span> Rekapitulasi Nilai & Absensi Pertemuan Cerdas — {currentTeacher.class}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Daftar rekap rentangan nilai skor (0-100) dan kehadiran siswa asuhan Anda.</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      handlePrintReport('class_summary', undefined, teacherStories, `REKAP NILAI & ABSENSI PERTEMUAN CERDAS - ${currentTeacher.class}`);
+                    }}
+                    className="px-4 py-2.5 bg-sky-50 hover:bg-sky-100 text-sky-700 font-extrabold text-xs rounded-xl border border-sky-200 flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <span>🖨️</span> Cetak / Export Rekap Nilai
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 font-extrabold uppercase text-[10px]">
+                        <th className="p-3.5 rounded-l-xl">No</th>
+                        <th className="p-3.5">Nama Siswa</th>
+                        <th className="p-3.5">Kelas</th>
+                        <th className="p-3.5">Status Refleksi</th>
+                        <th className="p-3.5">Absensi Cerdas</th>
+                        <th className="p-3.5 text-right rounded-r-xl">Skor / Nilai (0-100)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                      {teacherStudents.map((st, idx) => {
+                        const stStory = teacherStories.find(s => s.studentId === st.id);
+                        return (
+                          <tr key={st.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="p-3.5 text-slate-500 font-bold">{idx + 1}</td>
+                            <td className="p-3.5 font-extrabold flex items-center gap-2">
+                              <span className="text-base">{st.avatar}</span>
+                              <span>{st.name}</span>
+                            </td>
+                            <td className="p-3.5 text-slate-600 font-bold">{st.class}</td>
+                            <td className="p-3.5">
+                              {stStory ? (
+                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold ${stStory.guruNote ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                                  {stStory.guruNote ? 'Sudah Ditanggapi' : 'Menunggu Tanggapan'}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 italic">Belum Mengirim Cerita</span>
+                              )}
+                            </td>
+                            <td className="p-3.5">
+                              <span className="px-2.5 py-1 bg-sky-50 text-sky-700 rounded-full font-bold text-[10px] border border-sky-100">
+                                {stStory?.attendance || 'Hadir (Cerdas)'}
+                              </span>
+                            </td>
+                            <td className="p-3.5 text-right font-black text-sm">
+                              {stStory?.score !== undefined ? (
+                                <span className="text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100">
+                                  {stStory.score} / 100
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 italic font-normal">Belum Dinilai</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
           </div>
         )}
 
