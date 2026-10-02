@@ -422,14 +422,6 @@ export default function App() {
   const [editTeacherClasses, setEditTeacherClasses] = useState<string[]>([]);
 
   // Edit Student Modal State
-  const [studentEditCounts, setStudentEditCounts] = useState<{ [key: string]: number }>(() => {
-    try {
-      const saved = localStorage.getItem('studentEditCounts');
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [editStudentName, setEditStudentName] = useState('');
   const [editStudentClass, setEditStudentClass] = useState('Kelas VII A');
@@ -1513,18 +1505,6 @@ export default function App() {
       return;
     }
 
-    // If student is logged in, limit profile edits to max 2 times
-    if (role === 'murid') {
-      const currentCount = studentEditCounts[editingStudent.id] || 0;
-      if (currentCount >= 2) {
-        alert("⚠️ Batas maksimum edit profil (2 kali) telah terlampaui untuk mencegah spam!");
-        setEditingStudent(null);
-        return;
-      }
-      const updatedCounts = { ...studentEditCounts, [editingStudent.id]: currentCount + 1 };
-      setStudentEditCounts(updatedCounts);
-      localStorage.setItem('studentEditCounts', JSON.stringify(updatedCounts));
-    }
 
     const updatedStudent: Student = {
       ...editingStudent,
