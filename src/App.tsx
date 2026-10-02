@@ -394,6 +394,14 @@ export default function App() {
   const [editTeacherClasses, setEditTeacherClasses] = useState<string[]>([]);
 
   // Edit Student Modal State
+  const [studentEditCounts, setStudentEditCounts] = useState<{ [key: string]: number }>(() => {
+    try {
+      const saved = localStorage.getItem('studentEditCounts');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [editStudentName, setEditStudentName] = useState('');
   const [editStudentClass, setEditStudentClass] = useState('Kelas VII A');
@@ -1347,16 +1355,44 @@ export default function App() {
       return;
     }
 
+    const trimmedName = editStudentName.trim();
+    const trimmedLower = trimmedName.toLowerCase();
+
+    // If student is logged in, check name collision (trying to impersonate another student's name)
+    const nameCollision = students.some(st => st.id !== editingStudent.id && st.name.trim().toLowerCase() === trimmedLower);
+    if (role === 'murid' && nameCollision) {
+      alert("⚠️ PERINGATAN KEAMANAN: Terdeteksi percobaan mengubah atau memakai nama siswa lain! Sesi Anda dihentikan dan Anda dikeluarkan dari aplikasi.");
+      setEditingStudent(null);
+      setSelectedStudent(null);
+      setRole('portal');
+      localStorage.removeItem('selectedStudent');
+      playTone(150, 'sawtooth', 0.5);
+      return;
+    }
+
+    // If student is logged in, limit profile edits to max 2 times
+    if (role === 'murid') {
+      const currentCount = studentEditCounts[editingStudent.id] || 0;
+      if (currentCount >= 2) {
+        alert("⚠️ Batas maksimum edit profil (2 kali) telah terlampaui untuk mencegah spam!");
+        setEditingStudent(null);
+        return;
+      }
+      const updatedCounts = { ...studentEditCounts, [editingStudent.id]: currentCount + 1 };
+      setStudentEditCounts(updatedCounts);
+      localStorage.setItem('studentEditCounts', JSON.stringify(updatedCounts));
+    }
+
     try {
       await updateStudentInFirestore(editingStudent.id, {
-        name: editStudentName.trim(),
+        name: trimmedName,
         class: editStudentClass,
         avatar: editStudentAvatar,
         guruWali: editStudentGuruWali
       });
 
       setEditingStudent(null);
-      setAdminStudentSuccessMsg(`✅ Profil Murid "${editStudentName}" telah berhasil diperbarui!`);
+      setAdminStudentSuccessMsg(`✅ Profil Murid "${trimmedName}" telah berhasil diperbarui!`);
       setTimeout(() => setAdminStudentSuccessMsg(''), 5000);
       playTone(523.25, 'sine', 0.15);
     } catch (err) {
@@ -1366,29 +1402,59 @@ export default function App() {
   };
 
   // Filtered lists for the active teacher (Guru Wali)
-  const teacherStudents = students.filter(st => {
-    if (activeGuruWaliFilter === 'Semua') return true;
-    if (st.guruWali === activeGuruWaliFilter) return true;
-    if (activeGuruWaliFilter.includes('Sumayasa') && (st.guruWali?.includes('Sumayasa') || st.class.startsWith('Kelas VIII'))) return true;
-    if (currentTeacher && activeGuruWaliFilter === currentTeacher.name) {
-      if (currentTeacher.class && currentTeacher.class.includes(st.class)) return true;
+  const isStudentForTeacher = (st: any, filterName: string) => {
+    if (filterName === 'Semua') return true;
+
+    const stGuru = (st.guruWali || '').trim().toLowerCase();
+    const targetName = filterName.trim().toLowerCase();
+
+    const targetTeacher = teachers.find(t => t.name.toLowerCase() === targetName || t.name.toLowerCase().includes(targetName) || targetName.includes(t.name.toLowerCase())) || 
+                          (currentTeacher && (currentTeacher.name.toLowerCase() === targetName || currentTeacher.name.toLowerCase().includes(targetName) || targetName.includes(currentTeacher.name.toLowerCase())) ? currentTeacher : null);
+
+    if (targetTeacher) {
+      const teacherNameLower = targetTeacher.name.toLowerCase();
+      // If student has an assigned guruWali
+      if (stGuru) {
+        if (stGuru.includes(teacherNameLower) || teacherNameLower.includes(stGuru) || stGuru.includes(targetName) || targetName.includes(stGuru)) {
+          return true;
+        }
+        // If student's guruWali belongs to another registered teacher, exclude them
+        const belongsToOtherTeacher = teachers.some(t => t.name.toLowerCase() !== teacherNameLower && (stGuru.includes(t.name.toLowerCase()) || t.name.toLowerCase().includes(stGuru)));
+        if (belongsToOtherTeacher) {
+          return false;
+        }
+      }
+
+      // If student has no guruWali or unmatched, check class match
+      if (targetTeacher.class) {
+        const teacherClassLower = targetTeacher.class.toLowerCase();
+        const studentClassLower = st.class.toLowerCase();
+        const studentClean = studentClassLower.replace('kelas', '').trim();
+        if (teacherClassLower.includes(studentClassLower) || (studentClean && teacherClassLower.includes(studentClean))) {
+          return !stGuru;
+        }
+      }
     }
+
+    if (targetName.includes('sumayasa')) {
+      if (stGuru && (stGuru.includes('sumayasa') || stGuru.includes('i wayan'))) return true;
+      if (stGuru && teachers.some(t => !t.name.toLowerCase().includes('sumayasa') && stGuru.includes(t.name.toLowerCase()))) return false;
+      if (!stGuru && (st.class.startsWith('Kelas VIII') || st.class.startsWith('Kelas IX'))) return true;
+    }
+
     return false;
-  });
+  };
+
+  const effectiveFilter = currentTeacher ? currentTeacher.name : activeGuruWaliFilter;
+  const teacherStudents = students.filter(st => isStudentForTeacher(st, effectiveFilter));
 
   const teacherStories = stories.filter(story => {
     const student = students.find(st => st.id === story.studentId);
     if (!student) return false;
-    if (activeGuruWaliFilter === 'Semua') return true;
-    if (student.guruWali === activeGuruWaliFilter) return true;
-    if (activeGuruWaliFilter.includes('Sumayasa') && (student.guruWali?.includes('Sumayasa') || student.class.startsWith('Kelas VIII'))) return true;
-    if (currentTeacher && activeGuruWaliFilter === currentTeacher.name) {
-      if (currentTeacher.class && currentTeacher.class.includes(student.class)) return true;
-    }
-    return false;
+    return isStudentForTeacher(student, effectiveFilter);
   });
 
-  const teacherClassesLabel = Array.from(new Set(teacherStudents.map(s => s.class))).join(', ') || currentTeacher?.class || 'Binaan';
+  const teacherClassesLabel = currentTeacher?.class || Array.from(new Set(teacherStudents.map(s => s.class))).join(' & ') || 'Binaan';
 
   // Student specific history
   const studentStories = stories.filter(s => s.studentId === selectedStudent?.id);
@@ -3176,27 +3242,8 @@ export default function App() {
                 </div>
               </div>
               <div className="flex items-center gap-3.5 self-stretch md:self-auto justify-between border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-slate-600 whitespace-nowrap">Filter:</span>
-                  <select
-                    value={activeGuruWaliFilter}
-                    onChange={(e) => {
-                      setActiveGuruWaliFilter(e.target.value);
-                      setActiveStoryDetail(null);
-                      playTone(440, 'sine', 0.1);
-                    }}
-                    className="px-3.5 py-2 border-2 border-slate-200 rounded-xl bg-white text-xs font-bold text-slate-700 focus:outline-none focus:border-sky-500"
-                  >
-                    <option value="Semua">Semua Guru Wali & Kelas (Seluruh Sekolah)</option>
-                    <option value={currentTeacher.name}>{currentTeacher.name} (Asuhan Anda)</option>
-                    {teachers
-                      .filter(t => t.name !== currentTeacher.name && !t.class?.includes('BK'))
-                      .map(t => (
-                        <option key={t.id} value={t.name}>
-                          {t.name} ({t.class})
-                        </option>
-                      ))}
-                  </select>
+                <div className="flex items-center gap-2 bg-sky-50 border border-sky-100 px-3.5 py-2 rounded-xl text-xs font-bold text-sky-800">
+                  <span>👩‍🏫 Akun Asuhan: <strong className="text-slate-900">{currentTeacher.name}</strong></span>
                 </div>
                 <button
                   onClick={handleTeacherLogout}
@@ -3390,7 +3437,7 @@ export default function App() {
                               <div className="flex flex-wrap items-center gap-2 mb-1">
                                 <h4 className="font-extrabold text-slate-800 text-base">{story.studentName}</h4>
                                 <span className="text-xs text-slate-400">·</span>
-                                <span className="text-xs text-slate-500">Kelas 4A</span>
+                                <span className="text-xs text-slate-500">{students.find(st => st.id === story.studentId)?.class || 'Kelas SMP'}</span>
                                 <span className="text-xs text-slate-400">·</span>
                                 <span className="text-xs text-slate-500">{new Date(story.timestamp).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</span>
                               </div>
