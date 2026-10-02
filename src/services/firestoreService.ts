@@ -66,48 +66,16 @@ const DEFAULT_TEACHERS: Teacher[] = [
 
 const DEFAULT_STORIES: Story[] = [];
 
-// Cleanup mock/auto-generated students and stories (only on-demand)
+// Cleanup mock/auto-generated test students if specifically requested (safe, never runs automatically)
 export async function cleanupMockStudentsAndStories() {
-  try {
-    const studentsSnap = await getDocs(collection(db, 'students')).catch(() => null);
-    const storiesSnap = await getDocs(collection(db, 'stories')).catch(() => null);
-
-    if (studentsSnap) {
-      for (const docSnap of studentsSnap.docs) {
-        const id = docSnap.id;
-        if (['budi', 'siti', 'andi', 'prama'].includes(id) || id.startsWith('st-roster-')) {
-          await deleteDoc(doc(db, 'students', id)).catch(() => {});
-        }
-      }
-    }
-    if (storiesSnap) {
-      for (const storyDoc of storiesSnap.docs) {
-        const id = storyDoc.id;
-        if (id.startsWith('story-mock-')) {
-          await deleteDoc(doc(db, 'stories', id)).catch(() => {});
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error cleaning up mock students:', error);
-  }
+  // Disabled automatic bulk deletion to protect daily Firestore write quota
+  return;
 }
 
-// Seed initial data if collections are empty
+// Seed initial data (pure zero-write in-memory fallback to preserve Firestore quota)
 export async function seedInitialFirestoreData() {
-  try {
-    // Purge any stale system-generated mock data
-    await cleanupMockStudentsAndStories();
-
-    const teachersSnap = await getDocs(collection(db, 'teachers')).catch(() => null);
-    if (teachersSnap && teachersSnap.empty) {
-      for (const t of DEFAULT_TEACHERS) {
-        await setDoc(doc(db, 'teachers', t.id), t, { merge: true }).catch(() => {});
-      }
-    }
-  } catch (error) {
-    console.warn('Initial seeding skipped:', error);
-  }
+  // No-op: default teachers and system structures are handled in-memory without consuming Firestore write quota.
+  return;
 }
 
 // Function to bulk generate 465 students across Grade 7, 8, 9 (15 classes x 31 students)
@@ -179,25 +147,152 @@ export async function seedFullRoster465StudentsToFirestore(): Promise<number> {
   }
 }
 
+// Local deletion and custom persistence for students
+export function getDeletedStudentIds(): string[] {
+  try {
+    const saved = localStorage.getItem('cerdas_deleted_student_ids');
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function markStudentDeletedLocally(id: string) {
+  try {
+    const current = getDeletedStudentIds();
+    if (!current.includes(id)) {
+      localStorage.setItem('cerdas_deleted_student_ids', JSON.stringify([...current, id]));
+    }
+    removeCustomStudentLocally(id);
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+export function unmarkStudentDeletedLocally(id: string) {
+  try {
+    const current = getDeletedStudentIds();
+    localStorage.setItem('cerdas_deleted_student_ids', JSON.stringify(current.filter(i => i !== id)));
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+export function getCustomStudents(): Student[] {
+  try {
+    const saved = localStorage.getItem('cerdas_custom_students');
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomStudentLocally(student: Student) {
+  try {
+    const list = getCustomStudents().filter(s => s.id !== student.id);
+    localStorage.setItem('cerdas_custom_students', JSON.stringify([student, ...list]));
+    unmarkStudentDeletedLocally(student.id);
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+export function removeCustomStudentLocally(studentId: string) {
+  try {
+    const list = getCustomStudents().filter(s => s.id !== studentId);
+    localStorage.setItem('cerdas_custom_students', JSON.stringify(list));
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
 // Subscribe to Students collection in real-time
 export function subscribeStudents(callback: (students: Student[]) => void) {
   return onSnapshot(
     collection(db, 'students'),
     (snapshot) => {
-      const list = snapshot.docs
+      const deletedIds = new Set(getDeletedStudentIds());
+      const customStudents = getCustomStudents().filter(s => !deletedIds.has(s.id));
+      const firestoreStudents = snapshot.docs
         .map(d => ({ ...d.data(), id: d.id } as Student))
-        .filter(s => {
-          if (!s.id) return false;
-          // Filter out system auto-generated mock roster students
-          if (s.id.startsWith('st-roster-') || ['budi', 'siti', 'andi', 'prama'].includes(s.id)) return false;
-          return true;
-        });
-      callback(list);
+        .filter(s => !!s.id && !!s.name && !deletedIds.has(s.id));
+
+      const mergedMap = new Map<string, Student>();
+      for (const s of customStudents) {
+        if (!deletedIds.has(s.id)) mergedMap.set(s.id, s);
+      }
+      for (const s of firestoreStudents) {
+        if (!deletedIds.has(s.id)) mergedMap.set(s.id, s);
+      }
+
+      callback(Array.from(mergedMap.values()));
     },
     (error) => {
+      const deletedIds = new Set(getDeletedStudentIds());
+      const customStudents = getCustomStudents().filter(s => !deletedIds.has(s.id));
+      callback(customStudents);
       handleFirestoreError(error, OperationType.LIST, 'students');
     }
   );
+}
+
+// Local deletion and custom persistence for teachers
+export function getDeletedTeacherIds(): string[] {
+  try {
+    const saved = localStorage.getItem('cerdas_deleted_teacher_ids');
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function markTeacherDeletedLocally(id: string) {
+  try {
+    const current = getDeletedTeacherIds();
+    if (!current.includes(id)) {
+      localStorage.setItem('cerdas_deleted_teacher_ids', JSON.stringify([...current, id]));
+    }
+    removeCustomTeacherLocally(id);
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+export function unmarkTeacherDeletedLocally(id: string) {
+  try {
+    const current = getDeletedTeacherIds();
+    localStorage.setItem('cerdas_deleted_teacher_ids', JSON.stringify(current.filter(i => i !== id)));
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+export function getCustomTeachers(): Teacher[] {
+  try {
+    const saved = localStorage.getItem('cerdas_custom_teachers');
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomTeacherLocally(teacher: Teacher) {
+  try {
+    const list = getCustomTeachers().filter(t => t.id !== teacher.id);
+    localStorage.setItem('cerdas_custom_teachers', JSON.stringify([teacher, ...list]));
+    unmarkTeacherDeletedLocally(teacher.id);
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+export function removeCustomTeacherLocally(teacherId: string) {
+  try {
+    const list = getCustomTeachers().filter(t => t.id !== teacherId);
+    localStorage.setItem('cerdas_custom_teachers', JSON.stringify(list));
+  } catch (e) {
+    console.warn(e);
+  }
 }
 
 // Subscribe to Teachers collection in real-time
@@ -205,10 +300,36 @@ export function subscribeTeachers(callback: (teachers: Teacher[]) => void) {
   return onSnapshot(
     collection(db, 'teachers'),
     (snapshot) => {
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Teacher));
-      callback(list);
+      const deletedIds = new Set(getDeletedTeacherIds());
+      const customTeachers = getCustomTeachers().filter(t => !deletedIds.has(t.id));
+      const firestoreTeachers = snapshot.docs
+        .map(d => ({ ...d.data(), id: d.id } as Teacher))
+        .filter(t => !deletedIds.has(t.id));
+
+      const mergedMap = new Map<string, Teacher>();
+      // 1. Defaults
+      for (const t of DEFAULT_TEACHERS) {
+        if (!deletedIds.has(t.id)) mergedMap.set(t.id, t);
+      }
+      // 2. Custom local teachers
+      for (const t of customTeachers) {
+        if (!deletedIds.has(t.id)) mergedMap.set(t.id, t);
+      }
+      // 3. Cloud Firestore teachers
+      for (const t of firestoreTeachers) {
+        if (!deletedIds.has(t.id)) mergedMap.set(t.id, t);
+      }
+
+      callback(Array.from(mergedMap.values()));
     },
     (error) => {
+      const deletedIds = new Set(getDeletedTeacherIds());
+      const customTeachers = getCustomTeachers().filter(t => !deletedIds.has(t.id));
+      const defaults = DEFAULT_TEACHERS.filter(t => !deletedIds.has(t.id));
+      const mergedMap = new Map<string, Teacher>();
+      for (const t of defaults) mergedMap.set(t.id, t);
+      for (const t of customTeachers) mergedMap.set(t.id, t);
+      callback(Array.from(mergedMap.values()));
       handleFirestoreError(error, OperationType.LIST, 'teachers');
     }
   );
@@ -221,12 +342,7 @@ export function subscribeStories(callback: (stories: Story[]) => void) {
     (snapshot) => {
       const list = snapshot.docs
         .map(d => ({ ...d.data(), id: d.id } as Story))
-        .filter(s => {
-          if (!s.id) return false;
-          if (s.id.startsWith('story-mock-')) return false;
-          if (s.studentId && (s.studentId.startsWith('st-roster-') || ['budi', 'siti', 'andi', 'prama'].includes(s.studentId))) return false;
-          return true;
-        });
+        .filter(s => !!s.id);
       // Sort newest first
       list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       callback(list);
@@ -321,17 +437,20 @@ export async function addStudentToFirestore(studentData: { name: string; class: 
     createdAt: new Date().toISOString()
   };
 
+  saveCustomStudentLocally(newStudent);
+
   try {
     await setDoc(doc(db, 'students', id), newStudent);
     return newStudent;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `students/${id}`);
-    throw error;
+    return newStudent;
   }
 }
 
 // Delete Student and associated stories
 export async function deleteStudentFromFirestore(studentId: string, associatedStories: Story[]) {
+  markStudentDeletedLocally(studentId);
   try {
     await deleteDoc(doc(db, 'students', studentId));
     for (const st of associatedStories) {
@@ -341,7 +460,6 @@ export async function deleteStudentFromFirestore(studentId: string, associatedSt
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `students/${studentId}`);
-    throw error;
   }
 }
 
@@ -357,22 +475,24 @@ export async function registerTeacherToFirestore(data: { name: string; email: st
     createdAt: new Date().toISOString()
   };
 
+  saveCustomTeacherLocally(newTeacher);
+
   try {
     await setDoc(doc(db, 'teachers', id), newTeacher);
     return newTeacher;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `teachers/${id}`);
-    throw error;
+    return newTeacher;
   }
 }
 
 // Delete Teacher
 export async function deleteTeacherFromFirestore(teacherId: string) {
+  markTeacherDeletedLocally(teacherId);
   try {
     await deleteDoc(doc(db, 'teachers', teacherId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `teachers/${teacherId}`);
-    throw error;
   }
 }
 

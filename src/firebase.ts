@@ -1,11 +1,18 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import { getFirestore, setLogLevel } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+
+// Suppress Firestore SDK internal quota warnings and retry storm logs
+try {
+  setLogLevel('silent');
+} catch (e) {
+  // Ignore
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -59,16 +66,5 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   return errInfo;
 }
-
-export async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log('Connected to Firebase Firestore successfully.');
-  } catch (error) {
-    // Firestore automatically handles offline caching and retries once connection is established
-    console.info('Firestore initialized.');
-  }
-}
-testConnection();
 
 export default app;

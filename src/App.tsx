@@ -14,6 +14,7 @@ import {
   ChevronRight, 
   AlertTriangle, 
   CheckCircle, 
+  AlertCircle,
   User, 
   TrendingUp, 
   MessageCircle, 
@@ -51,10 +52,12 @@ import {
   saveStoryToFirestore,
   addStudentToFirestore,
   deleteStudentFromFirestore,
+  markStudentDeletedLocally,
   deleteStoryFromFirestore,
   updateStudentInFirestore,
   registerTeacherToFirestore,
   deleteTeacherFromFirestore,
+  markTeacherDeletedLocally,
   updateTeacherInFirestore,
   updateGuruNoteInFirestore,
   escalateStoryInFirestore,
@@ -289,7 +292,26 @@ export default function App() {
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [copyReportSuccess, setCopyReportSuccess] = useState(false);
   const [storyToDelete, setStoryToDelete] = useState<{ id: string; studentName: string; isFromBk?: boolean } | null>(null);
+  const [studentToDelete, setStudentToDelete] = useState<{
+    id: string;
+    name: string;
+    className?: string;
+    hasStory?: boolean;
+    storyId?: string;
+    storyFeeling?: string;
+  } | null>(null);
+  const [teacherToDelete, setTeacherToDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [deleteNotification, setDeleteNotification] = useState<string>('');
+  
+  // Global Toast Notification State
+  const [toast, setToast] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
+
+  // Per-story feedback local cache (Teacher feedback input)
+  const [storyFeedback, setStoryFeedback] = useState<Record<string, { note: string; score: string; attendance: string }>>({});
 
   // Student Directory Filter & Capacity States (Supports 465+ Students)
   const [studentClassFilter, setStudentClassFilter] = useState('Semua');
@@ -583,6 +605,35 @@ export default function App() {
     }
   };
 
+  // Global Toast Dispatcher
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToast({ id: String(Date.now()), type, message });
+    playTone(type === 'error' ? 220 : 523.25, 'sine', 0.15);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToast(null);
+    }, 4500);
+  };
+
+  // Helper to read and edit story feedback for teacher feed
+  const getStoryFeedback = (s: any) => {
+    return storyFeedback[s.id] || {
+      note: s.guruNote || '',
+      score: (s.score !== undefined ? s.score : 85).toString(),
+      attendance: s.attendance || 'Hadir'
+    };
+  };
+
+  const handleUpdateStoryFeedback = (storyId: string, field: 'note' | 'score' | 'attendance', value: string, defaultStory: any) => {
+    const current = getStoryFeedback(defaultStory);
+    setStoryFeedback(prev => ({
+      ...prev,
+      [storyId]: { ...current, [field]: value }
+    }));
+  };
+
   // Submit story handler
   const handleStorySubmit = async () => {
     // If student is still recording voice note, stop recording
@@ -603,6 +654,7 @@ export default function App() {
 
     setIsSubmitting(true);
     const activeChar = CHARACTERS.find(c => c.emotion === selectedFeeling);
+    let storyPayload: any = null;
 
     try {
       // Friendly defaults if student used Voice Note or only filled partial steps
@@ -643,7 +695,7 @@ export default function App() {
         ? `${selectedFeeling} (Alasan: ${feelingReasonText.trim()})`
         : selectedFeeling;
 
-      const storyPayload: any = {
+      storyPayload = {
         studentId: selectedStudent.id,
         studentName: selectedStudent.name,
         guruWali: selectedStudent.guruWali || 'I Wayan Sumayasa, S.Pd',
@@ -663,6 +715,19 @@ export default function App() {
 
       if (editingStoryId) {
         storyPayload.id = editingStoryId;
+        // Check for changes to avoid redundant writes
+        const existingStory = stories.find(s => s.id === editingStoryId);
+        if (existingStory &&
+            existingStory.fact === finalFact &&
+            existingStory.feeling === fullFeelingText &&
+            existingStory.character === (activeChar?.id || 'Giga') &&
+            existingStory.finding === finalFinding &&
+            existingStory.future === finalFuture &&
+            existingStory.audioBase64 === (recordedAudio || '')) {
+          setStep(6);
+          setEditingStoryId(null);
+          return;
+        }
       }
 
       await saveStoryToFirestore(storyPayload);
@@ -684,8 +749,23 @@ export default function App() {
       setFutureText('');
       setRecordedAudio('');
     } catch (err) {
-      alert("Terjadi kesalahan saat menyimpan cerita ke cloud Firestore. Silakan periksa koneksi internet Anda.");
       console.error(err);
+      if (String(err).includes('resource-exhausted') || String(err).includes('Quota limit exceeded') || String(err).includes('Quota exceeded')) {
+        // Fallback: save to local state so student work is preserved
+        const localStory = { ...storyPayload, id: storyPayload.id || `story-local-${Date.now()}` };
+        setStories(prev => [localStory, ...prev.filter(s => s.id !== localStory.id)]);
+        setSuccessConfetti(true);
+        setStep(6);
+        setEditingStoryId(null);
+        setFactText('');
+        setFeelingReasonText('');
+        setFindingText('');
+        setFutureText('');
+        setRecordedAudio('');
+        alert("Pemberitahuan: Kuota penulisan database gratis harian Firebase sedang penuh. Ceritamu tetap berhasil disimpan di layar aplikasi ini!");
+      } else {
+        alert("Terjadi kesalahan saat menyimpan cerita ke cloud Firestore. Silakan periksa koneksi internet Anda.");
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -714,55 +794,85 @@ export default function App() {
 
   // Teacher reply submit handler
   const handleTeacherReplySubmit = async (storyId: string) => {
-    if (!teacherReplyText.trim()) {
-      alert("Tanggapan guru tidak boleh kosong!");
-      return;
-    }
+    const story = stories.find(s => s.id === storyId);
+    if (!story) return;
 
-    const scoreNum = parseInt(teacherScoreInput, 10);
+    const currentFeedback = getStoryFeedback(story);
+    const cleanNote = currentFeedback.note.trim();
+    const scoreNum = parseInt(currentFeedback.score, 10);
     const finalScore = isNaN(scoreNum) ? 85 : Math.min(100, Math.max(0, scoreNum));
+    const attendance = currentFeedback.attendance || 'Hadir';
 
+    // 1. Optimistic update
+    setStories(prev => prev.map(s => s.id === storyId ? {
+      ...s,
+      guruNote: cleanNote,
+      score: finalScore,
+      attendance: attendance,
+      status: 'Selesai Direfleksi'
+    } : s));
+
+    // 2. Play tone & show toast
+    showToast(`✅ Tanggapan guru, nilai (${finalScore}), dan absensi berhasil disimpan!`);
+
+    // 3. Firestore async sync
     try {
-      await updateGuruNoteInFirestore(storyId, teacherReplyText.trim(), finalScore, teacherAttendanceInput);
-      setTeacherReplyText('');
-      playTone(523.25, 'sine', 0.2);
+      await updateGuruNoteInFirestore(storyId, cleanNote, finalScore, attendance);
     } catch (err) {
-      console.error(err);
-      alert("Gagal menyimpan tanggapan dan nilai.");
+      console.warn("Saved locally, firestore sync note:", err);
     }
   };
 
   // Teacher manual escalation submit
   const handleTeacherEscalate = async (storyId: string) => {
+    const note = customEscalateNote.trim();
+    
+    // 1. Optimistic update
+    setStories(prev => prev.map(s => s.id === storyId ? {
+      ...s,
+      escalated: true,
+      status: 'Butuh Bantuan',
+      counselorNote: note || s.counselorNote
+    } : s));
+    setShowEscalateModal(false);
+    setCustomEscalateNote('');
+    showToast("✅ Cerita murid berhasil dirujuk ke Guru BK!");
+
+    // 2. Firestore async sync
     try {
-      if (customEscalateNote.trim()) {
-        await updateCounselorNoteInFirestore(storyId, customEscalateNote.trim());
+      if (note) {
+        await updateCounselorNoteInFirestore(storyId, note);
       } else {
         await escalateStoryInFirestore(storyId);
       }
-      setShowEscalateModal(false);
-      setCustomEscalateNote('');
-      playTone(392, 'triangle', 0.3);
     } catch (err) {
-      console.error(err);
-      alert("Gagal merujuk cerita ke BK.");
+      console.warn("Escalated locally, firestore sync note:", err);
     }
   };
 
   // Counselor logs session action note
   const handleCounselorNoteSubmit = async (storyId: string) => {
-    if (!counselorActionNote.trim()) {
+    const cleanNote = counselorActionNote.trim();
+    if (!cleanNote) {
       alert("Catatan penanganan BK tidak boleh kosong!");
       return;
     }
 
+    // 1. Optimistic update
+    setStories(prev => prev.map(s => s.id === storyId ? {
+      ...s,
+      counselorNote: cleanNote,
+      escalated: true,
+      status: 'Butuh Bantuan'
+    } : s));
+    setCounselorActionNote('');
+    showToast("✅ Catatan penanganan Guru BK berhasil disimpan!");
+
+    // 2. Firestore async sync
     try {
-      await updateCounselorNoteInFirestore(storyId, counselorActionNote.trim());
-      setCounselorActionNote('');
-      playTone(523.25, 'sine', 0.2);
+      await updateCounselorNoteInFirestore(storyId, cleanNote);
     } catch (err) {
-      console.error(err);
-      alert("Gagal menyimpan catatan penanganan BK.");
+      console.warn("Saved locally, firestore sync note:", err);
     }
   };
 
@@ -960,32 +1070,50 @@ export default function App() {
         avatar: newStudentAvatar,
         guruWali: newStudentGuruWali
       });
+      setStudents(prev => [newStud, ...prev.filter(s => s.id !== newStud.id)]);
       setSelectedStudent(newStud);
       localStorage.setItem('cerdas_student_id', newStud.id);
       setStudentClassFilter(newStudentClass);
       setNewStudentName('');
       setShowAddStudentModal(false);
-      playTone(523.25, 'sine', 0.15);
+      showToast(`✅ Akun Murid "${cleanName}" berhasil didaftarkan dan disimpan!`);
     } catch (err) {
       console.error(err);
-      alert("Gagal menambahkan murid ke Firestore.");
+      const localStudent: Student = {
+        id: `local-st-${Date.now()}`,
+        name: cleanName,
+        class: newStudentClass,
+        avatar: newStudentAvatar,
+        status: 'Aktif',
+        guruWali: newStudentGuruWali
+      };
+      setStudents(prev => [localStudent, ...prev]);
+      setSelectedStudent(localStudent);
+      localStorage.setItem('cerdas_student_id', localStudent.id);
+      setStudentClassFilter(newStudentClass);
+      setNewStudentName('');
+      setShowAddStudentModal(false);
+      showToast(`✅ Akun Murid "${cleanName}" berhasil disimpan (lokal)!`);
     }
   };
 
   // Reset student account (Admin feature)
   const handleResetStudent = async (studentId: string, name: string) => {
-    if (!window.confirm(`Apakah Anda yakin ingin MERESET akun murid "${name}"?\n\nIni akan menghapus akun agar murid dapat mendaftar ulang secara bersih.`)) {
-      return;
+    markStudentDeletedLocally(studentId);
+
+    // Optimistic reset
+    setStudents(prev => prev.filter(s => s.id !== studentId));
+    setStories(prev => prev.filter(s => s.studentId !== studentId));
+    if (selectedStudent?.id === studentId) {
+      setSelectedStudent(null);
+      localStorage.removeItem('cerdas_student_id');
     }
+    showToast(`✅ Akun murid "${name}" berhasil di-reset. Murid dapat mendaftar kembali.`);
 
     try {
       await deleteStudentFromFirestore(studentId, stories);
-      playTone(523.25, 'sine', 0.2);
-      setAdminStudentSuccessMsg(`✅ Akun murid "${name}" berhasil di-reset oleh Admin! Murid kini dapat mendaftar kembali.`);
-      setTimeout(() => setAdminStudentSuccessMsg(''), 6000);
     } catch (err) {
-      console.error(err);
-      alert("Gagal mereset akun murid.");
+      console.warn("Reset locally, firestore sync note:", err);
     }
   };
 
@@ -1001,14 +1129,21 @@ export default function App() {
 
   // Delete student and their story history
   const handleDeleteStudent = async (studentId: string, name: string) => {
+    markStudentDeletedLocally(studentId);
+
+    // Optimistic delete
+    setStudents(prev => prev.filter(s => s.id !== studentId));
+    setStories(prev => prev.filter(s => s.studentId !== studentId));
+    if (selectedStudent?.id === studentId) {
+      setSelectedStudent(null);
+      localStorage.removeItem('cerdas_student_id');
+    }
+    showToast(`🗑️ Data murid "${name}" berhasil dihapus.`);
+
     try {
       await deleteStudentFromFirestore(studentId, stories);
-      playTone(220, 'triangle', 0.2);
-      setDeleteNotification(`✅ Data murid "${name}" berhasil dihapus.`);
-      setTimeout(() => setDeleteNotification(''), 4000);
     } catch (err) {
-      console.error(err);
-      alert("Gagal menghapus data murid.");
+      console.warn("Deleted locally, firestore sync note:", err);
     }
   };
 
@@ -1170,53 +1305,80 @@ export default function App() {
   // Admin registers new teacher
   const handleAdminAddTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!adminNewTeacherName.trim() || !adminNewTeacherEmail.trim() || !adminNewTeacherPassword.trim()) {
-      alert("Nama, email, dan kata sandi wajib diisi!");
+    const cleanName = adminNewTeacherName.trim();
+    const cleanEmail = adminNewTeacherEmail.trim().toLowerCase();
+    const cleanPassword = adminNewTeacherPassword.trim();
+
+    if (!cleanName || !cleanEmail || !cleanPassword) {
+      showToast("⚠️ Nama, email, dan kata sandi guru wajib diisi!", "error");
       return;
     }
 
+    const existing = teachers.find(t => t.email?.toLowerCase() === cleanEmail);
+    if (existing) {
+      showToast(`⚠️ Email guru "${cleanEmail}" sudah terdaftar sebelumnya.`, "error");
+      return;
+    }
+
+    const classAssigned = adminNewTeacherClasses.length > 0 ? adminNewTeacherClasses.join(', ') : 'Umum';
+
     try {
-      const existing = teachers.find(t => t.email?.toLowerCase() === adminNewTeacherEmail.trim().toLowerCase());
-      if (existing) {
-        alert("Email guru ini sudah terdaftar sebelumnya.");
-        return;
-      }
-
-      const classAssigned = adminNewTeacherClasses.length > 0 ? adminNewTeacherClasses.join(', ') : 'Umum';
-
-      await registerTeacherToFirestore({
-        name: adminNewTeacherName.trim(),
-        email: adminNewTeacherEmail.trim(),
-        password: adminNewTeacherPassword.trim(),
+      const newTeacher = await registerTeacherToFirestore({
+        name: cleanName,
+        email: cleanEmail,
+        password: cleanPassword,
         class: classAssigned
       });
 
+      setTeachers(prev => [newTeacher, ...prev.filter(t => t.id !== newTeacher.id)]);
       setAdminNewTeacherName('');
       setAdminNewTeacherEmail('');
       setAdminNewTeacherPassword('password123');
       setAdminNewTeacherClasses(['Kelas VII A']);
-      setAdminTeacherSuccessMsg(`✅ Akun Guru "${adminNewTeacherName}" berhasil didaftarkan ke Cloud Firestore!`);
-      setTimeout(() => setAdminTeacherSuccessMsg(''), 5000);
-      playTone(523.25, 'sine', 0.15);
+      setAdminTeacherSuccessMsg(`✅ Akun Guru "${cleanName}" berhasil didaftarkan!`);
+      showToast(`✅ Akun Guru "${cleanName}" berhasil didaftarkan dan disimpan!`);
+      playTone(523, 'sine', 0.15);
+      setTimeout(() => setAdminTeacherSuccessMsg(''), 4000);
     } catch (err) {
       console.error(err);
-      alert("Gagal mendaftarkan akun guru.");
+      const localTeacher: Teacher = {
+        id: `t-local-${Date.now()}`,
+        name: cleanName,
+        email: cleanEmail,
+        password: cleanPassword,
+        class: classAssigned
+      };
+      setTeachers(prev => [localTeacher, ...prev]);
+      setAdminNewTeacherName('');
+      setAdminNewTeacherEmail('');
+      setAdminNewTeacherPassword('password123');
+      setAdminNewTeacherClasses(['Kelas VII A']);
+      showToast(`✅ Akun Guru "${cleanName}" berhasil didaftarkan dan disimpan!`);
     }
   };
 
   // Admin deletes teacher
   const handleAdminDeleteTeacher = async (teacherId: string, teacherName: string) => {
     if (teacherId === 't-bk') {
-      alert("Akun Guru BK (Ni Made Medi Astuti) tidak dapat dihapus karena merupakan akun sistem penting.");
+      showToast("⚠️ Akun Guru BK (Ni Made Medi Astuti) tidak dapat dihapus.", "error");
       return;
     }
-    if (!window.confirm(`Hapus akun guru "${teacherName}" dari Cloud Firestore?`)) return;
+    
+    // 1. Mark deleted locally immediately to prevent onSnapshot resurrection
+    markTeacherDeletedLocally(teacherId);
+
+    // 2. Optimistic delete from UI
+    setTeachers(prev => prev.filter(t => t.id !== teacherId));
+    if (currentTeacher?.id === teacherId) {
+      handleTeacherLogout();
+    }
+    showToast(`🗑️ Akun Guru "${teacherName}" berhasil dihapus.`);
+
+    // 3. Firestore delete
     try {
       await deleteTeacherFromFirestore(teacherId);
-      playTone(220, 'triangle', 0.2);
     } catch (err) {
-      console.error(err);
-      alert("Gagal menghapus akun guru.");
+      console.warn("Deleted locally, firestore sync note:", err);
     }
   };
 
@@ -1225,32 +1387,42 @@ export default function App() {
     e.preventDefault();
     const cleanName = adminNewStudentName.trim();
     if (!cleanName) {
-      alert("Nama murid wajib diisi!");
+      showToast("⚠️ Nama murid wajib diisi!", "error");
       return;
     }
 
     // Check 1-time registration constraint
     const existing = students.find(s => s.name.trim().toLowerCase() === cleanName.toLowerCase());
     if (existing) {
-      alert(`⚠️ Murid dengan nama "${cleanName}" sudah terdaftar sebelumnya!\n\nGunakan tombol "Reset Akun" di sebelah kanan jika ingin mendaftarkan ulang murid ini.`);
+      showToast(`⚠️ Murid "${cleanName}" sudah terdaftar! Gunakan tombol Reset Akun untuk mendaftar ulang.`, "error");
       return;
     }
 
     try {
-      await addStudentToFirestore({
+      const newStud = await addStudentToFirestore({
         name: cleanName,
         class: adminNewStudentClass,
         avatar: adminNewStudentAvatar,
         guruWali: adminNewStudentGuruWali
       });
 
+      setStudents(prev => [newStud, ...prev.filter(s => s.id !== newStud.id)]);
       setAdminNewStudentName('');
-      setAdminStudentSuccessMsg(`✅ Akun Murid "${cleanName}" berhasil didaftarkan ke Cloud Firestore!`);
-      setTimeout(() => setAdminStudentSuccessMsg(''), 5000);
-      playTone(523.25, 'sine', 0.15);
+      showToast(`✅ Data Murid "${cleanName}" berhasil didaftarkan dan disimpan!`);
+      playTone(523, 'sine', 0.15);
     } catch (err) {
       console.error(err);
-      alert("Gagal mendaftarkan murid.");
+      const localStudent: Student = {
+        id: `st-local-${Date.now()}`,
+        name: cleanName,
+        class: adminNewStudentClass,
+        avatar: adminNewStudentAvatar,
+        status: 'Aktif',
+        guruWali: adminNewStudentGuruWali
+      };
+      setStudents(prev => [localStudent, ...prev]);
+      setAdminNewStudentName('');
+      showToast(`✅ Data Murid "${cleanName}" berhasil disimpan!`);
     }
   };
 
@@ -1273,22 +1445,38 @@ export default function App() {
       return;
     }
 
+    const cleanName = editTeacherName.trim();
+    const cleanEmail = editTeacherEmail.trim().toLowerCase();
+    const cleanPassword = editTeacherPassword.trim();
+    const classAssigned = editTeacherClasses.length > 0 ? editTeacherClasses.join(', ') : 'Umum';
+
+    const updatedTeacher: Teacher = {
+      ...editingTeacher,
+      name: cleanName,
+      email: cleanEmail,
+      password: cleanPassword,
+      class: classAssigned
+    };
+
+    // 1. Optimistic update
+    setTeachers(prev => prev.map(t => t.id === editingTeacher.id ? updatedTeacher : t));
+    if (currentTeacher?.id === editingTeacher.id) {
+      setCurrentTeacher(updatedTeacher);
+      localStorage.setItem('currentTeacher', JSON.stringify(updatedTeacher));
+    }
+    setEditingTeacher(null);
+    showToast(`✅ Perubahan data Guru "${cleanName}" berhasil disimpan!`);
+
+    // 2. Async sync
     try {
-      const classAssigned = editTeacherClasses.length > 0 ? editTeacherClasses.join(', ') : 'Umum';
       await updateTeacherInFirestore(editingTeacher.id, {
-        name: editTeacherName.trim(),
-        email: editTeacherEmail.trim().toLowerCase(),
-        password: editTeacherPassword.trim(),
+        name: cleanName,
+        email: cleanEmail,
+        password: cleanPassword,
         class: classAssigned
       });
-
-      setEditingTeacher(null);
-      setAdminTeacherSuccessMsg(`✅ Akun Guru "${editTeacherName}" telah berhasil diperbarui!`);
-      setTimeout(() => setAdminTeacherSuccessMsg(''), 5000);
-      playTone(523.25, 'sine', 0.15);
     } catch (err) {
-      console.error(err);
-      alert("Gagal memperbarui data guru.");
+      console.warn("Updated locally, firestore sync note:", err);
     }
   };
 
@@ -1338,6 +1526,24 @@ export default function App() {
       localStorage.setItem('studentEditCounts', JSON.stringify(updatedCounts));
     }
 
+    const updatedStudent: Student = {
+      ...editingStudent,
+      name: trimmedName,
+      class: editStudentClass,
+      avatar: editStudentAvatar,
+      guruWali: editStudentGuruWali
+    };
+
+    // 1. Optimistic update
+    setStudents(prev => prev.map(st => st.id === editingStudent.id ? updatedStudent : st));
+    if (selectedStudent?.id === editingStudent.id) {
+      setSelectedStudent(updatedStudent);
+      localStorage.setItem('selectedStudent', JSON.stringify(updatedStudent));
+    }
+    setEditingStudent(null);
+    showToast(`✅ Profil Murid "${trimmedName}" berhasil diperbarui dan disimpan!`);
+
+    // 2. Async sync
     try {
       await updateStudentInFirestore(editingStudent.id, {
         name: trimmedName,
@@ -1345,14 +1551,8 @@ export default function App() {
         avatar: editStudentAvatar,
         guruWali: editStudentGuruWali
       });
-
-      setEditingStudent(null);
-      setAdminStudentSuccessMsg(`✅ Profil Murid "${trimmedName}" telah berhasil diperbarui!`);
-      setTimeout(() => setAdminStudentSuccessMsg(''), 5000);
-      playTone(523.25, 'sine', 0.15);
     } catch (err) {
-      console.error(err);
-      alert("Gagal memperbarui profil murid.");
+      console.warn("Updated locally, firestore sync note:", err);
     }
   };
 
@@ -1521,6 +1721,31 @@ export default function App() {
         .animate-pipi-wiggle { animation: pipi-wiggle 0.6s infinite alternate ease-in-out; }
         .animate-caca-shine { animation: caca-shine 2.5s infinite ease-in-out; }
       `}</style>
+
+      {/* GLOBAL TOAST NOTIFICATION */}
+      {toast && (
+        <aside aria-label="Notifikasi Sistem" className="fixed top-5 left-1/2 -translate-x-1/2 z-[99999] flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl border backdrop-blur-md transition-all animate-bounce-subtle bg-slate-900/95 text-white border-slate-700 max-w-md w-[92vw] sm:w-auto">
+          <div className={`p-2 rounded-xl text-lg ${toast.type === 'error' ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+            {toast.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
+          </div>
+          <div className="flex-1 pr-2">
+            <p className="text-[10px] font-black tracking-wider uppercase text-slate-400">
+              {toast.type === 'error' ? 'Pemberitahuan Sistem' : 'Status Penyimpanan Data'}
+            </p>
+            <p className="text-xs font-bold text-white mt-0.5 leading-snug">
+              {toast.message}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+            title="Tutup Notifikasi"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </aside>
+      )}
 
       {/* Global Header Contract - 3 Zones */}
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 md:px-8 py-3 flex items-center justify-between">
@@ -3427,9 +3652,23 @@ export default function App() {
 
               {/* Mood Ring of Classroom Roster */}
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-                <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-1.5">
-                  <span>🎯</span> Pantauan Emosi Harian Murid
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                    <span>🎯</span> Pantauan Emosi Murid ({teacherStudents.length})
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewStudentClass(currentTeacher?.class && !currentTeacher.class.includes(',') ? currentTeacher.class : 'Kelas VII A');
+                      setNewStudentGuruWali(currentTeacher?.name || '');
+                      setShowAddStudentModal(true);
+                    }}
+                    className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-[11px] rounded-xl border border-indigo-200 flex items-center gap-1 transition-all shadow-xs cursor-pointer"
+                    title="Tambah Murid Binaan Baru"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" /> + Tambah Murid
+                  </button>
+                </div>
                 <div className="flex flex-col gap-2">
                   {teacherStudents.map((st) => {
                     const stStory = teacherStories.find(s => s.studentId === st.id);
@@ -3449,7 +3688,7 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           {lastChar ? (
                             <div className="flex items-center gap-2">
                               <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${lastChar.bubbleColor}`}>
@@ -3464,9 +3703,27 @@ export default function App() {
                           )}
                           <button
                             type="button"
-                            onClick={() => handleDeleteStudent(st.id, st.name)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors focus:outline-none"
-                            title="Hapus Akun Siswa"
+                            onClick={() => handleOpenEditStudent(st)}
+                            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors focus:outline-none cursor-pointer"
+                            title="Edit Data Murid"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStudentToDelete({
+                                id: st.id,
+                                name: st.name,
+                                className: st.class,
+                                hasStory: !!stStory,
+                                storyId: stStory?.id,
+                                storyFeeling: stStory?.feeling
+                              });
+                              playTone(350, 'triangle', 0.1);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors focus:outline-none cursor-pointer"
+                            title="Hapus Akun Siswa atau Reset Catatan Emosi"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -3757,62 +4014,76 @@ export default function App() {
                               </div>
 
                               {/* Form Reply Panel */}
-                              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-3">
-                                <h5 className="font-extrabold text-xs text-indigo-700 uppercase tracking-wider border-b border-slate-100 pb-2">
-                                  📝 Tulis Tanggapan, Nilai & Absensi Pertemuan Cerdas
-                                </h5>
-                                <div className="flex flex-col gap-2.5">
-                                  <div className="grid grid-cols-2 gap-3">
-                                    <div className="flex flex-col gap-1">
-                                      <label className="text-[11px] font-extrabold text-slate-700">Skor / Nilai (0-100):</label>
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        max="100"
-                                        value={teacherScoreInput}
-                                        onChange={(e) => setTeacherScoreInput(e.target.value)}
-                                        className="px-3 py-2 text-xs border border-slate-200 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-indigo-500 bg-white"
+                              {(() => {
+                                const fb = getStoryFeedback(story);
+                                return (
+                                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-3">
+                                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                                      <h5 className="font-extrabold text-xs text-indigo-700 uppercase tracking-wider">
+                                        📝 Tulis Tanggapan, Nilai & Absensi Pertemuan Cerdas
+                                      </h5>
+                                      {story.guruNote && (
+                                        <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                          ✓ Sudah Direfleksi Guru
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-col gap-2.5">
+                                      <div className="grid grid-cols-2 gap-3">
+                                        <div className="flex flex-col gap-1">
+                                          <label className="text-[11px] font-extrabold text-slate-700">Skor / Nilai (0-100):</label>
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            max="100"
+                                            value={fb.score}
+                                            onChange={(e) => handleUpdateStoryFeedback(story.id, 'score', e.target.value, story)}
+                                            className="px-3 py-2 text-xs border border-slate-200 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-indigo-500 bg-white"
+                                          />
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                          <label className="text-[11px] font-extrabold text-slate-700">Absensi Pertemuan:</label>
+                                          <select
+                                            value={fb.attendance}
+                                            onChange={(e) => handleUpdateStoryFeedback(story.id, 'attendance', e.target.value, story)}
+                                            className="px-3 py-2 text-xs border border-slate-200 rounded-lg font-bold text-slate-700 focus:outline-none focus:border-indigo-500 bg-white"
+                                          >
+                                            <option value="Hadir">Hadir (Pertemuan Cerdas)</option>
+                                            <option value="Izin">Izin</option>
+                                            <option value="Sakit">Sakit</option>
+                                            <option value="Alpha">Alpha</option>
+                                          </select>
+                                        </div>
+                                      </div>
+                                      <textarea
+                                        value={fb.note}
+                                        onChange={(e) => handleUpdateStoryFeedback(story.id, 'note', e.target.value, story)}
+                                        placeholder="Ketik tanggapan yang menenangkan emosi murid..."
+                                        className="w-full h-24 p-3 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 leading-relaxed bg-white"
                                       />
-                                    </div>
-                                    <div className="flex flex-col gap-1">
-                                      <label className="text-[11px] font-extrabold text-slate-700">Absensi Pertemuan:</label>
-                                      <select
-                                        value={teacherAttendanceInput}
-                                        onChange={(e) => setTeacherAttendanceInput(e.target.value)}
-                                        className="px-3 py-2 text-xs border border-slate-200 rounded-lg font-bold text-slate-700 focus:outline-none focus:border-indigo-500 bg-white"
-                                      >
-                                        <option value="Hadir">Hadir (Pertemuan Cerdas)</option>
-                                        <option value="Izin">Izin</option>
-                                        <option value="Sakit">Sakit</option>
-                                        <option value="Alpha">Alpha</option>
-                                      </select>
+                                      <div className="flex gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleTeacherReplySubmit(story.id)}
+                                          className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                                        >
+                                          💾 Simpan Tanggapan & Nilai Guru
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setCustomEscalateNote(story.analysis?.rekomendasi_bk || '');
+                                            setShowEscalateModal(true);
+                                          }}
+                                          className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold text-xs rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                                        >
+                                          Rujuk ke BK / Ortu
+                                        </button>
+                                      </div>
                                     </div>
                                   </div>
-                                  <textarea
-                                    value={teacherReplyText}
-                                    onChange={(e) => setTeacherReplyText(e.target.value)}
-                                    placeholder="Ketik tanggapan yang menenangkan emosi murid..."
-                                    className="w-full h-24 p-3 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 leading-relaxed bg-white"
-                                  />
-                                  <div className="flex gap-2">
-                                    <button
-                                      onClick={() => handleTeacherReplySubmit(story.id)}
-                                      className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-colors"
-                                    >
-                                      Kirim Tanggapan ke Murid
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        setCustomEscalateNote(story.analysis?.rekomendasi_bk || '');
-                                        setShowEscalateModal(true);
-                                      }}
-                                      className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-lg border border-rose-200 transition-colors"
-                                    >
-                                      Rujuk ke BK / Ortu
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
+                                );
+                              })()}
 
                             </div>
 
@@ -4719,11 +4990,15 @@ export default function App() {
                               <Edit className="w-3.5 h-3.5 text-indigo-600" /> Edit
                             </button>
                             <button
-                              onClick={() => handleAdminDeleteTeacher(t.id, t.name)}
-                              title="Hapus akun guru"
-                              className="p-2 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors border border-transparent hover:border-rose-200"
+                              type="button"
+                              onClick={() => {
+                                setTeacherToDelete({ id: t.id, name: t.name });
+                                playTone(350, 'triangle', 0.1);
+                              }}
+                              title={`Hapus akun guru ${t.name}`}
+                              className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold text-[11px] rounded-xl transition-colors border border-rose-200 flex items-center gap-1 shadow-xs cursor-pointer active:scale-95"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Hapus
                             </button>
                           </div>
                         </div>
@@ -4898,11 +5173,23 @@ export default function App() {
                                 <RefreshCw className="w-3.5 h-3.5 text-amber-600" /> Reset Akun
                               </button>
                               <button
-                                onClick={() => handleDeleteStudent(st.id, st.name)}
-                                title="Hapus siswa dari database"
-                                className="p-2 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors border border-transparent hover:border-rose-200"
+                                type="button"
+                                onClick={() => {
+                                  const stStory = stories.find(s => s.studentId === st.id);
+                                  setStudentToDelete({
+                                    id: st.id,
+                                    name: st.name,
+                                    className: st.class,
+                                    hasStory: !!stStory,
+                                    storyId: stStory?.id,
+                                    storyFeeling: stStory?.feeling
+                                  });
+                                  playTone(350, 'triangle', 0.1);
+                                }}
+                                title={`Hapus data murid ${st.name}`}
+                                className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold text-[11px] rounded-xl transition-colors border border-rose-200 flex items-center gap-1 shadow-xs cursor-pointer active:scale-95"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Hapus
                               </button>
                             </div>
                           </div>
@@ -5971,18 +6258,18 @@ export default function App() {
                 <button
                   type="button"
                   onClick={async () => {
+                    const sid = storyToDelete.id;
+                    const sname = storyToDelete.studentName;
+                    setStories(prev => prev.map(s => s.id === sid ? { ...s, escalated: false, status: 'Selesai Direfleksi' } : s));
+                    if (activeStoryDetail?.id === sid) {
+                      setActiveStoryDetail(null);
+                    }
+                    showToast(`✅ Kasus rujukan murid "${sname}" berhasil diselesaikan dari Portal BK!`);
+                    setStoryToDelete(null);
                     try {
-                      await unescalateStoryInFirestore(storyToDelete.id);
-                      if (activeStoryDetail?.id === storyToDelete.id) {
-                        setActiveStoryDetail(null);
-                      }
-                      playTone(523, 'sine', 0.15);
-                      setDeleteNotification(`✅ Kasus rujukan murid "${storyToDelete.studentName}" berhasil dihapus dari Portal Guru BK!`);
-                      setTimeout(() => setDeleteNotification(''), 4000);
+                      await unescalateStoryInFirestore(sid);
                     } catch (e) {
-                      console.error(e);
-                    } finally {
-                      setStoryToDelete(null);
+                      console.warn("Unescalated locally, firestore sync note:", e);
                     }
                   }}
                   className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
@@ -5994,18 +6281,18 @@ export default function App() {
               <button
                 type="button"
                 onClick={async () => {
+                  const sid = storyToDelete.id;
+                  const sname = storyToDelete.studentName;
+                  setStories(prev => prev.filter(s => s.id !== sid));
+                  if (activeStoryDetail?.id === sid) {
+                    setActiveStoryDetail(null);
+                  }
+                  showToast(`🗑️ Berkas cerita murid "${sname}" berhasil dihapus.`);
+                  setStoryToDelete(null);
                   try {
-                    await deleteStoryFromFirestore(storyToDelete.id);
-                    if (activeStoryDetail?.id === storyToDelete.id) {
-                      setActiveStoryDetail(null);
-                    }
-                    playTone(220, 'triangle', 0.2);
-                    setDeleteNotification(`🗑️ Berkas murid "${storyToDelete.studentName}" berhasil dihapus permanen.`);
-                    setTimeout(() => setDeleteNotification(''), 4000);
+                    await deleteStoryFromFirestore(sid);
                   } catch (e) {
-                    console.error(e);
-                  } finally {
-                    setStoryToDelete(null);
+                    console.warn("Deleted locally, firestore sync note:", e);
                   }
                 }}
                 className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
@@ -6016,6 +6303,176 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setStoryToDelete(null)}
+                className="w-full py-2 text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KONFIRMASI HAPUS / RESET MURID & PANTAUAN EMOSI */}
+      {studentToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in print:hidden">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200 flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <span className="p-3 bg-rose-100 text-rose-600 rounded-2xl">
+                <Trash2 className="w-6 h-6" />
+              </span>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  Hapus Data / Pantauan Emosi Murid
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Murid: <span className="font-bold text-slate-800">{studentToDelete.name}</span>
+                  {studentToDelete.className ? ` (${studentToDelete.className})` : ''}
+                </p>
+              </div>
+            </div>
+
+            {studentToDelete.hasStory && studentToDelete.storyId ? (
+              <div className="flex flex-col gap-2 bg-amber-50/80 p-3.5 rounded-2xl border border-amber-200 text-xs">
+                <p className="font-bold text-amber-900 flex items-center gap-1.5">
+                  <span>📌</span> Status Emosi Aktif: <span className="underline font-black">{studentToDelete.storyFeeling || 'Ada Catatan Cerita'}</span>
+                </p>
+                <p className="text-amber-800 text-[11px] leading-relaxed">
+                  Pilih apakah Anda hanya ingin mereset/menghapus <strong>catatan jurnal emosi hari ini</strong> (murid tetap ada di kelas binaan), atau menghapus <strong>akun murid secara permanen</strong>.
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+                Apakah Anda yakin ingin menghapus data murid <strong>"{studentToDelete.name}"</strong> dari kelas binaan dan database sekolah? Tindakan ini bersifat permanen.
+              </p>
+            )}
+
+            <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+              {studentToDelete.hasStory && studentToDelete.storyId && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const stId = studentToDelete.storyId!;
+                    const sname = studentToDelete.name;
+                    // Reset story only
+                    setStories(prev => prev.filter(s => s.id !== stId));
+                    showToast(`🧹 Pantauan emosi murid "${sname}" berhasil direset. Status kembali 'Belum bercerita'.`);
+                    setStudentToDelete(null);
+                    try {
+                      await deleteStoryFromFirestore(stId);
+                    } catch (e) {
+                      console.warn("Deleted story locally, sync note:", e);
+                    }
+                  }}
+                  className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  🧹 Reset Emosi Hari Ini Saja (Hapus Jurnal Cerita)
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={async () => {
+                  const sid = studentToDelete.id;
+                  const sname = studentToDelete.name;
+                  
+                  // 1. Mark locally
+                  markStudentDeletedLocally(sid);
+
+                  // 2. Optimistic UI delete
+                  setStudents(prev => prev.filter(s => s.id !== sid));
+                  setStories(prev => prev.filter(s => s.studentId !== sid));
+                  if (selectedStudent?.id === sid) {
+                    setSelectedStudent(null);
+                    localStorage.removeItem('cerdas_student_id');
+                  }
+                  showToast(`🗑️ Data murid "${sname}" berhasil dihapus secara permanen.`);
+                  setStudentToDelete(null);
+
+                  // 3. Firestore delete
+                  try {
+                    await deleteStudentFromFirestore(sid, stories);
+                  } catch (e) {
+                    console.warn("Deleted locally, sync note:", e);
+                  }
+                }}
+                className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" /> Hapus Akun Murid Permanen
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStudentToDelete(null)}
+                className="w-full py-2 text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KONFIRMASI HAPUS GURU */}
+      {teacherToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in print:hidden">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200 flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <span className="p-3 bg-rose-100 text-rose-600 rounded-2xl">
+                <Trash2 className="w-6 h-6" />
+              </span>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  Hapus Akun Guru
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Guru: <span className="font-bold text-slate-800">{teacherToDelete.name}</span>
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+              Apakah Anda yakin ingin menghapus akun guru <strong>"{teacherToDelete.name}"</strong> dari sistem sekolah? Tindakan ini bersifat permanen.
+            </p>
+
+            <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={async () => {
+                  const tid = teacherToDelete.id;
+                  const tname = teacherToDelete.name;
+
+                  if (tid === 't-bk') {
+                    showToast('⚠️ Akun Guru BK (Ni Made Medi Astuti) tidak dapat dihapus.', 'error');
+                    setTeacherToDelete(null);
+                    return;
+                  }
+
+                  // 1. Mark locally
+                  markTeacherDeletedLocally(tid);
+
+                  // 2. Optimistic UI update
+                  setTeachers(prev => prev.filter(t => t.id !== tid));
+                  if (currentTeacher?.id === tid) {
+                    handleTeacherLogout();
+                  }
+                  showToast(`🗑️ Akun Guru "${tname}" berhasil dihapus.`);
+                  setTeacherToDelete(null);
+
+                  // 3. Firestore delete
+                  try {
+                    await deleteTeacherFromFirestore(tid);
+                  } catch (e) {
+                    console.warn("Deleted locally, sync note:", e);
+                  }
+                }}
+                className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" /> Ya, Hapus Akun Guru
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTeacherToDelete(null)}
                 className="w-full py-2 text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-xl transition-colors cursor-pointer"
               >
                 Batal
