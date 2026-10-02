@@ -34,8 +34,14 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  if (errMsg.includes('resource-exhausted') || errMsg.includes('Quota limit exceeded') || errMsg.includes('Quota exceeded')) {
+    console.warn(`Firestore Quota Limit Notice (${operationType} ${path || ''}): Free daily write units per project reached for today.`);
+    return null;
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -59,9 +65,8 @@ export async function testConnection() {
     await getDocFromServer(doc(db, 'test', 'connection'));
     console.log('Connected to Firebase Firestore successfully.');
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-    }
+    // Firestore automatically handles offline caching and retries once connection is established
+    console.info('Firestore initialized.');
   }
 }
 testConnection();

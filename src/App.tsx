@@ -39,6 +39,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Search,
   X
 } from 'lucide-react';
 import {
@@ -263,6 +264,8 @@ export default function App() {
   // Guru Wali dashboard filter
   const [filterStatus, setFilterStatus] = useState<string>('Semua');
   const [filterRisk, setFilterRisk] = useState<string>('Semua');
+  const [teacherViewScope, setTeacherViewScope] = useState<'assigned' | 'all'>('assigned');
+  const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
   const [activeStoryDetail, setActiveStoryDetail] = useState<any | null>(null);
   const [teacherReplyText, setTeacherReplyText] = useState('');
   const [customEscalateNote, setCustomEscalateNote] = useState('');
@@ -465,64 +468,6 @@ export default function App() {
       if (updated) setSelectedStudent(updated);
     }
   }, [students]);
-
-  // Ensure every student's guruWali matches a registered teacher from portal admin
-  useEffect(() => {
-    if (teachers.length === 0 || students.length === 0) return;
-    const validTeacherNames = new Set(teachers.map(t => t.name));
-
-    students.forEach(st => {
-      const isInvalid = 
-        !st.guruWali || 
-        st.guruWali.includes('Rahma') || 
-        st.guruWali.includes('Deni Saputra') || 
-        !validTeacherNames.has(st.guruWali);
-
-      const isPrama = st.name.toUpperCase().includes('I GEDE PRAMA PUTRA ANTARA');
-
-      if (isInvalid || (isPrama && st.class !== 'Kelas VII A')) {
-        // Find matching teacher from portal admin teachers whose class includes st.class
-        const matchedTeacher = 
-          teachers.find(t => !t.class?.includes('BK') && t.class && t.class.includes(st.class)) ||
-          teachers.find(t => !t.class?.includes('BK') && (
-            (st.class.startsWith('Kelas VII') && t.class?.includes('Kelas VII')) ||
-            (st.class.startsWith('Kelas VIII') && t.class?.includes('Kelas VIII')) ||
-            (st.class.startsWith('Kelas IX') && t.class?.includes('Kelas IX'))
-          ));
-
-        const fallbackGuru = matchedTeacher ? matchedTeacher.name : 'I Wayan Sumayasa, S.Pd';
-
-        updateStudentInFirestore(st.id, {
-          ...(isInvalid ? { guruWali: fallbackGuru } : {}),
-          ...(isPrama && st.class !== 'Kelas VII A' ? { class: 'Kelas VII A' } : {})
-        });
-      }
-    });
-  }, [students, teachers]);
-
-  // Ensure Guru BK Ni Made Medi Astuti, S.Pd., M.Pd is present in teachers collection
-  useEffect(() => {
-    if (teachers.length > 0) {
-      const hasBk = teachers.some(t => t.name.toLowerCase().includes('medi astuti') || t.class?.includes('BK'));
-      if (!hasBk) {
-        registerTeacherToFirestore({
-          name: 'Ni Made Medi Astuti, S.Pd., M.Pd',
-          email: 'mediastuti@cerdas.id',
-          password: 'password123',
-          class: 'Guru BK (Kelas VII - IX)'
-        });
-      }
-    }
-  }, [teachers]);
-
-  // Ensure Andi Prasetyo is removed from Guru BK referrals
-  useEffect(() => {
-    stories.forEach(st => {
-      if (st.studentName?.toLowerCase().includes('andi prasetyo') && st.escalated) {
-        unescalateStoryInFirestore(st.id);
-      }
-    });
-  }, [stories]);
 
   // Audio Recording Logic
   const startRecording = async () => {
@@ -1409,58 +1354,103 @@ export default function App() {
 
   // Filtered lists for the active teacher (Guru Wali)
   const isStudentForTeacher = (st: any, filterName: string) => {
-    if (filterName === 'Semua') return true;
+    if (!st) return false;
+    if (filterName === 'Semua' || teacherViewScope === 'all') return true;
 
     const stGuru = (st.guruWali || '').trim().toLowerCase();
     const targetName = filterName.trim().toLowerCase();
+
+    // Guru BK or Umum can view all students
+    if (currentTeacher?.class === 'Umum' || currentTeacher?.class?.toLowerCase().includes('bk')) {
+      return true;
+    }
 
     const targetTeacher = teachers.find(t => t.name.toLowerCase() === targetName || t.name.toLowerCase().includes(targetName) || targetName.includes(t.name.toLowerCase())) || 
                           (currentTeacher && (currentTeacher.name.toLowerCase() === targetName || currentTeacher.name.toLowerCase().includes(targetName) || targetName.includes(currentTeacher.name.toLowerCase())) ? currentTeacher : null);
 
     if (targetTeacher) {
       const teacherNameLower = targetTeacher.name.toLowerCase();
-      // If student has an assigned guruWali
-      if (stGuru) {
-        if (stGuru.includes(teacherNameLower) || teacherNameLower.includes(stGuru) || stGuru.includes(targetName) || targetName.includes(stGuru)) {
-          return true;
-        }
-        // If student's guruWali belongs to another registered teacher, exclude them
-        const belongsToOtherTeacher = teachers.some(t => t.name.toLowerCase() !== teacherNameLower && (stGuru.includes(t.name.toLowerCase()) || t.name.toLowerCase().includes(stGuru)));
-        if (belongsToOtherTeacher) {
-          return false;
-        }
+      // Match by assigned guruWali
+      if (stGuru && (stGuru.includes(teacherNameLower) || teacherNameLower.includes(stGuru) || stGuru.includes(targetName) || targetName.includes(stGuru))) {
+        return true;
       }
 
-      // If student has no guruWali or unmatched, check class match
+      // Match by class
       if (targetTeacher.class) {
         const teacherClassLower = targetTeacher.class.toLowerCase();
-        const studentClassLower = st.class.toLowerCase();
+        const studentClassLower = (st.class || '').toLowerCase();
         const studentClean = studentClassLower.replace('kelas', '').trim();
-        if (teacherClassLower.includes(studentClassLower) || (studentClean && teacherClassLower.includes(studentClean))) {
-          return !stGuru;
+        const teacherClean = teacherClassLower.replace('kelas', '').trim();
+        if (teacherClassLower.includes(studentClassLower) || studentClassLower.includes(teacherClassLower) || 
+            (studentClean && teacherClean && (teacherClean.includes(studentClean) || studentClean.includes(teacherClean)))) {
+          return true;
         }
       }
     }
 
     if (targetName.includes('sumayasa')) {
       if (stGuru && (stGuru.includes('sumayasa') || stGuru.includes('i wayan'))) return true;
-      if (stGuru && teachers.some(t => !t.name.toLowerCase().includes('sumayasa') && stGuru.includes(t.name.toLowerCase()))) return false;
-      if (!stGuru && (st.class.startsWith('Kelas VIII') || st.class.startsWith('Kelas IX'))) return true;
+      if (st.class && (st.class.startsWith('Kelas VIII') || st.class.startsWith('Kelas IX') || st.class.startsWith('Kelas VII'))) return true;
+    }
+
+    return false;
+  };
+
+  const isStoryForTeacher = (story: Story | any, filterName: string) => {
+    if (!story) return false;
+    if (filterName === 'Semua' || teacherViewScope === 'all') return true;
+
+    // Guru BK or Umum sees all
+    if (currentTeacher?.class === 'Umum' || currentTeacher?.class?.toLowerCase().includes('bk')) {
+      return true;
+    }
+
+    const filterLower = filterName.toLowerCase();
+    const storyGuru = (story.guruWali || '').toLowerCase();
+
+    // 1. Direct match by story.guruWali
+    if (storyGuru) {
+      if (storyGuru.includes(filterLower) || filterLower.includes(storyGuru)) {
+        return true;
+      }
+      if (filterLower.includes('sumayasa') && (storyGuru.includes('sumayasa') || storyGuru.includes('i wayan'))) {
+        return true;
+      }
+    }
+
+    // 2. Lookup student by ID or studentName
+    const student = students.find(st => st.id === story.studentId) ||
+                    students.find(st => st.name?.toLowerCase().trim() === (story.studentName || '').toLowerCase().trim());
+
+    if (student) {
+      return isStudentForTeacher(student, filterName);
+    }
+
+    // 3. Match if story studentName is in teacherStudents
+    if (teacherStudents.some(st => st.name.toLowerCase().trim() === (story.studentName || '').toLowerCase().trim())) {
+      return true;
+    }
+
+    // 4. Default for Sumayasa account
+    if (filterLower.includes('sumayasa')) {
+      return true;
     }
 
     return false;
   };
 
   const effectiveFilter = currentTeacher ? currentTeacher.name : activeGuruWaliFilter;
-  const teacherStudents = students.filter(st => isStudentForTeacher(st, effectiveFilter));
+  const teacherStudents = teacherViewScope === 'all'
+    ? students
+    : students.filter(st => isStudentForTeacher(st, effectiveFilter));
 
-  const teacherStories = stories.filter(story => {
-    const student = students.find(st => st.id === story.studentId);
-    if (!student) return false;
-    return isStudentForTeacher(student, effectiveFilter);
-  });
+  const teacherStories = teacherViewScope === 'all'
+    ? stories
+    : stories.filter(story => isStoryForTeacher(story, effectiveFilter));
 
-  const teacherClassesLabel = currentTeacher?.class || Array.from(new Set(teacherStudents.map(s => s.class))).join(' & ') || 'Binaan';
+  const teacherClassesLabel = teacherViewScope === 'all' 
+    ? 'Semua Kelas' 
+    : (currentTeacher?.class || Array.from(new Set(teacherStudents.map(s => s.class))).join(' & ') || 'Binaan');
 
   // Student specific history
   const studentStories = stories.filter(s => s.studentId === selectedStudent?.id);
@@ -2007,28 +1997,46 @@ export default function App() {
                       </div>
 
                       {/* Fresh Notification / Inbox from Teacher */}
-                      {studentStories.some(s => s.teacherResponse) && (
+                      {studentStories.some(s => s.guruNote || s.teacherResponse) && (
                         <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-200 rounded-2xl p-5 shadow-sm">
-                          <h3 className="text-amber-800 font-extrabold text-sm flex items-center gap-2 mb-3">
-                            <Sparkles className="w-5 h-5 text-amber-500 fill-amber-300 animate-pulse" /> 
-                            KOTAK PESAN BAHAGIA (Tanggapan dari Wali Kelas)
+                          <h3 className="text-amber-800 font-extrabold text-sm flex items-center justify-between gap-2 mb-3">
+                            <span className="flex items-center gap-2">
+                              <Sparkles className="w-5 h-5 text-amber-500 fill-amber-300 animate-pulse" /> 
+                              KOTAK PESAN BAHAGIA (Tanggapan & Nilai dari Wali Kelas)
+                            </span>
+                            <span className="text-[10px] font-bold bg-amber-200/80 text-amber-900 px-2.5 py-0.5 rounded-full">
+                              Tersedia Umpan Balik
+                            </span>
                           </h3>
                           <div className="flex flex-col gap-3">
-                            {studentStories.filter(s => s.teacherResponse).slice(0, 2).map((s) => (
-                              <div key={s.id} className="bg-white border border-amber-100 p-4 rounded-xl shadow-sm flex flex-col gap-2">
-                                <div className="flex items-center justify-between text-xs text-slate-500">
-                                  <span className="font-bold flex items-center gap-1">
+                            {studentStories.filter(s => s.guruNote || s.teacherResponse).slice(0, 3).map((s) => (
+                              <div key={s.id} className="bg-white border border-amber-200/80 p-4 rounded-xl shadow-xs flex flex-col gap-2.5">
+                                <div className="flex items-center justify-between text-xs text-slate-500 flex-wrap gap-1">
+                                  <span className="font-extrabold text-slate-700 flex items-center gap-1.5">
                                     <span>{CHARACTERS.find(c => c.id === s.character)?.svg ? '⭐' : '📝'}</span> 
-                                    Cerita hari {new Date(s.timestamp).toLocaleDateString('id-ID', { weekday: 'long' })}
+                                    Refleksi {new Date(s.timestamp).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short' })}
                                   </span>
-                                  <span>{new Date(s.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    {s.score !== undefined && s.score !== null && (
+                                      <span className="px-2.5 py-0.5 bg-amber-400 text-amber-950 font-black text-xs rounded-full shadow-2xs">
+                                        ⭐ Nilai: {s.score}/100
+                                      </span>
+                                    )}
+                                    {s.attendance && (
+                                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-extrabold text-[10px] rounded-full border border-emerald-200">
+                                        ✓ {s.attendance}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
-                                <p className="text-xs text-slate-600 line-clamp-1 italic">"{s.fact}"</p>
-                                <div className="bg-amber-50/50 rounded-lg p-3 border-l-4 border-amber-400">
-                                  <p className="text-xs text-amber-900 font-semibold mb-1 flex items-center gap-1">
-                                    👩‍🏫 Ibu Wali Kelas berkata:
+                                <p className="text-xs text-slate-600 line-clamp-1 italic bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                  "{s.fact}"
+                                </p>
+                                <div className="bg-amber-50/70 rounded-xl p-3 border-l-4 border-amber-400">
+                                  <p className="text-xs text-amber-900 font-extrabold mb-1 flex items-center gap-1">
+                                    👩‍🏫 Guru Wali ({s.guruWali || selectedStudent?.guruWali || 'Wali Kelas'}) berkata:
                                   </p>
-                                  <p className="text-xs text-amber-800 leading-relaxed italic">"{s.teacherResponse}"</p>
+                                  <p className="text-xs text-amber-900 leading-relaxed italic font-medium">"{s.guruNote || s.teacherResponse}"</p>
                                 </div>
                               </div>
                             ))}
@@ -3048,30 +3056,73 @@ export default function App() {
                                 </div>
 
                                 {/* Teacher Response Badge & Edit Action */}
-                                <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex flex-col gap-2">
-                                  {story.teacherResponse ? (
-                                    <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
-                                      <p className="text-[10px] font-extrabold text-amber-800 flex items-center gap-1">
-                                        👩‍🏫 Tanggapan Guru Wali:
-                                      </p>
-                                      <p className="text-[10px] font-medium text-amber-700 italic mt-0.5 leading-normal">
-                                        "{story.teacherResponse}"
-                                      </p>
+                                <div className="p-3.5 border-t border-slate-100 bg-slate-50/70 flex flex-col gap-2.5">
+                                  {(story.guruNote || story.teacherResponse || (story.score !== undefined && story.score !== null)) ? (
+                                    <div className="bg-linear-to-br from-emerald-50 to-teal-50 border-2 border-emerald-300/80 p-3.5 rounded-2xl shadow-xs flex flex-col gap-2.5">
+                                      <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-emerald-200/60">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="flex h-2.5 w-2.5 relative">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                                          </span>
+                                          <p className="text-xs font-black text-emerald-900 flex items-center gap-1">
+                                            <span>✨</span> Ditanggapi oleh Guru Wali
+                                          </p>
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5">
+                                          {story.score !== undefined && story.score !== null && (
+                                            <span className="px-3 py-1 bg-amber-400 text-amber-950 font-black text-xs rounded-full shadow-xs flex items-center gap-1">
+                                              ⭐ Nilai: {story.score}/100
+                                            </span>
+                                          )}
+                                          {story.attendance && (
+                                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-extrabold text-[10px] rounded-full border border-emerald-200">
+                                              ✓ {story.attendance}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {(story.guruNote || story.teacherResponse) && (
+                                        <div>
+                                          <p className="text-[10px] font-extrabold text-emerald-800 uppercase tracking-wider mb-1">
+                                            💬 Tanggapan & Bimbingan Guru ({story.guruWali || selectedStudent?.guruWali || 'Guru Wali'}):
+                                          </p>
+                                          <p className="text-xs font-semibold text-emerald-950 leading-relaxed bg-white/90 p-2.5 rounded-xl border border-emerald-100 shadow-2xs">
+                                            "{story.guruNote || story.teacherResponse}"
+                                          </p>
+                                        </div>
+                                      )}
+
+                                      {story.counselorNote && (
+                                        <div className="pt-2 border-t border-emerald-200/50 bg-teal-50/60 p-2 rounded-xl text-xs">
+                                          <p className="text-[10px] font-extrabold text-teal-800 flex items-center gap-1">
+                                            <span>🤝</span> Catatan Bimbingan Konseling (BK):
+                                          </p>
+                                          <p className="text-teal-900 italic mt-0.5">
+                                            "{story.counselorNote}"
+                                          </p>
+                                        </div>
+                                      )}
                                     </div>
                                   ) : (
-                                    <div className="flex items-center justify-between text-slate-400">
-                                      <span className="text-[10px] font-bold italic flex items-center gap-1">
-                                        ⏱️ Menunggu dibaca Guru Wali
+                                    <div className="flex items-center justify-between text-slate-400 py-1">
+                                      <span className="text-[11px] font-bold italic flex items-center gap-1.5 text-slate-500">
+                                        <span>⏱️</span> Menunggu dibaca & ditanggapi Guru Wali
                                       </span>
                                       {story.status === 'Butuh Bantuan' && (
-                                        <span className="text-[9px] font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">
-                                          BK Terhubung
+                                        <span className="text-[10px] font-extrabold bg-rose-100 text-rose-700 px-2.5 py-0.5 rounded-full border border-rose-200">
+                                          🤝 Dalam Pantauan BK
                                         </span>
                                       )}
                                     </div>
                                   )}
 
-                                  <div className="flex items-center justify-end pt-1 border-t border-slate-200/60">
+                                  <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                                    <span className="text-[10px] font-bold text-slate-400">
+                                      {story.guruWali ? `Guru: ${story.guruWali}` : ''}
+                                    </span>
                                     <button
                                       type="button"
                                       onClick={() => handleStartEditStory(story)}
@@ -3427,60 +3478,136 @@ export default function App() {
             {/* RIGHT COLUMN: Interactive Story Feed */}
             <div className="lg:col-span-8 flex flex-col gap-4">
               
-              {/* Filter Bar */}
-              <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div className="flex items-center gap-2 self-start sm:self-center">
-                  <span className="text-xs font-bold text-slate-500">Filter Status:</span>
-                  <div className="flex gap-1">
-                    {['Semua', 'Menunggu Tanggapan', 'Butuh Bantuan', 'Teratasi'].map((status) => (
+              {/* Filter Bar & Scope Switcher */}
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-3.5">
+                {/* Scope Selection: Binaan Saya vs Semua Cerita Sekolah */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => { setTeacherViewScope('assigned'); playTone(440, 'sine', 0.1); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${teacherViewScope === 'assigned' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      🌟 Binaan Saya ({stories.filter(s => isStoryForTeacher(s, effectiveFilter)).length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setTeacherViewScope('all'); playTone(500, 'sine', 0.1); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${teacherViewScope === 'all' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      🌐 Semua Cerita Sekolah ({stories.length})
+                    </button>
+                  </div>
+
+                  {/* Search Bar */}
+                  <div className="relative flex-1 sm:max-w-xs">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Cari murid / kata kunci cerita..."
+                      value={teacherSearchQuery}
+                      onChange={(e) => setTeacherSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-3 py-1.5 bg-slate-50 hover:bg-slate-100 focus:bg-white text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500 transition-colors"
+                    />
+                    {teacherSearchQuery && (
                       <button
-                        key={status}
-                        onClick={() => setFilterStatus(status)}
-                        className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors ${filterStatus === status ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        type="button"
+                        onClick={() => setTeacherSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
                       >
-                        {status}
+                        ✕
                       </button>
-                    ))}
+                    )}
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const filtered = teacherStories.filter(s => filterStatus === 'Semua' || s.status === filterStatus);
-                    handlePrintReport(
-                      'class_summary',
-                      undefined,
-                      filtered,
-                      `LAPORAN REKAPITULASI JURNAL EMOSI KELAS (${currentTeacher ? currentTeacher.class : 'GURU WALI'})`
-                    );
-                  }}
-                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all self-end sm:self-center"
-                >
-                  <Printer className="w-3.5 h-3.5" /> Cetak Rekap Kelas
-                </button>
+                {/* Status & Risk Filters */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-slate-500">Status:</span>
+                    <div className="flex gap-1 flex-wrap">
+                      {['Semua', 'Menunggu Tanggapan', 'Butuh Bantuan', 'Teratasi'].map((status) => (
+                        <button
+                          key={status}
+                          onClick={() => setFilterStatus(status)}
+                          className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer ${filterStatus === status ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        >
+                          {status}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-                <div className="flex items-center gap-2 self-start sm:self-center">
-                  <span className="text-xs font-bold text-slate-500">Filter Risiko:</span>
-                  <div className="flex gap-1">
-                    {['Semua', 'Rendah', 'Sedang', 'Tinggi'].map((risk) => (
-                      <button
-                        key={risk}
-                        onClick={() => setFilterRisk(risk)}
-                        className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors ${filterRisk === risk ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                      >
-                        {risk}
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const filtered = teacherStories.filter(s => {
+                          if (filterStatus === 'Semua') return true;
+                          if (filterStatus === 'Menunggu Tanggapan') return s.status === 'Menunggu Diperiksa' || s.status === 'Menunggu Tanggapan' || (!s.guruNote && !s.teacherResponse);
+                          if (filterStatus === 'Butuh Bantuan') return s.status === 'Butuh Bantuan' || s.escalated === true;
+                          if (filterStatus === 'Teratasi') return s.status === 'Teratasi' || s.status === 'Selesai Direfleksi' || s.guruNote || s.teacherResponse;
+                          return s.status === filterStatus;
+                        });
+                        handlePrintReport(
+                          'class_summary',
+                          undefined,
+                          filtered,
+                          `LAPORAN REKAPITULASI JURNAL EMOSI KELAS (${currentTeacher ? currentTeacher.class : 'GURU WALI'})`
+                        );
+                      }}
+                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5" /> Cetak Rekap Kelas
+                    </button>
                   </div>
                 </div>
               </div>
 
               {/* Feed List */}
               <div className="flex flex-col gap-4">
+                {teacherStories.length === 0 && (
+                  <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center flex flex-col items-center justify-center gap-3 shadow-xs">
+                    <span className="text-4xl">📭</span>
+                    <div>
+                      <h4 className="font-extrabold text-slate-800 text-sm">Belum ada cerita yang terfilter untuk kelas asuhan ini</h4>
+                      <p className="text-xs text-slate-500 mt-1">Total ada {stories.length} cerita di seluruh sekolah.</p>
+                    </div>
+                    {teacherViewScope !== 'all' && (
+                      <button
+                        type="button"
+                        onClick={() => { setTeacherViewScope('all'); setFilterStatus('Semua'); setTeacherSearchQuery(''); playTone(440, 'sine', 0.1); }}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                      >
+                        🌐 Buka & Tampilkan Semua Cerita Sekolah ({stories.length})
+                      </button>
+                    )}
+                  </div>
+                )}
                 {teacherStories
-                  .filter(s => filterStatus === 'Semua' || s.status === filterStatus)
+                  .filter(s => {
+                    if (filterStatus === 'Semua') return true;
+                    if (filterStatus === 'Menunggu Tanggapan') {
+                      return s.status === 'Menunggu Diperiksa' || s.status === 'Menunggu Tanggapan' || (!s.guruNote && !s.teacherResponse);
+                    }
+                    if (filterStatus === 'Butuh Bantuan') {
+                      return s.status === 'Butuh Bantuan' || s.escalated === true;
+                    }
+                    if (filterStatus === 'Teratasi') {
+                      return s.status === 'Teratasi' || s.status === 'Selesai Direfleksi' || s.guruNote || s.teacherResponse;
+                    }
+                    return s.status === filterStatus;
+                  })
                   .filter(s => filterRisk === 'Semua' || s.analysis?.tingkat_risiko === filterRisk)
+                  .filter(s => {
+                    if (!teacherSearchQuery.trim()) return true;
+                    const q = teacherSearchQuery.toLowerCase();
+                    return (s.studentName || '').toLowerCase().includes(q) ||
+                           (s.fact || '').toLowerCase().includes(q) ||
+                           (s.feeling || '').toLowerCase().includes(q) ||
+                           (s.finding || '').toLowerCase().includes(q) ||
+                           (s.future || '').toLowerCase().includes(q);
+                  })
                   .map((story) => {
                     const char = CHARACTERS.find(c => c.id === story.character);
                     const riskColor = story.analysis?.tingkat_risiko === 'Tinggi' ? 'bg-rose-50 text-rose-700 border-rose-200' :

@@ -65,22 +65,26 @@ const DEFAULT_TEACHERS: Teacher[] = [
 
 const DEFAULT_STORIES: Story[] = [];
 
-// Cleanup mock/auto-generated students and stories
+// Cleanup mock/auto-generated students and stories (only on-demand)
 export async function cleanupMockStudentsAndStories() {
   try {
-    const studentsSnap = await getDocs(collection(db, 'students'));
-    const storiesSnap = await getDocs(collection(db, 'stories'));
+    const studentsSnap = await getDocs(collection(db, 'students')).catch(() => null);
+    const storiesSnap = await getDocs(collection(db, 'stories')).catch(() => null);
 
-    for (const docSnap of studentsSnap.docs) {
-      const id = docSnap.id;
-      if (['budi', 'siti', 'andi', 'prama'].includes(id) || id.startsWith('st-roster-')) {
-        await deleteDoc(doc(db, 'students', id));
+    if (studentsSnap) {
+      for (const docSnap of studentsSnap.docs) {
+        const id = docSnap.id;
+        if (['budi', 'siti', 'andi', 'prama'].includes(id) || id.startsWith('st-roster-')) {
+          await deleteDoc(doc(db, 'students', id)).catch(() => {});
+        }
       }
     }
-    for (const storyDoc of storiesSnap.docs) {
-      const id = storyDoc.id;
-      if (id.startsWith('story-mock-')) {
-        await deleteDoc(doc(db, 'stories', id));
+    if (storiesSnap) {
+      for (const storyDoc of storiesSnap.docs) {
+        const id = storyDoc.id;
+        if (id.startsWith('story-mock-')) {
+          await deleteDoc(doc(db, 'stories', id)).catch(() => {});
+        }
       }
     }
   } catch (error) {
@@ -91,17 +95,17 @@ export async function cleanupMockStudentsAndStories() {
 // Seed initial data if collections are empty
 export async function seedInitialFirestoreData() {
   try {
+    // Purge any stale system-generated mock data
     await cleanupMockStudentsAndStories();
 
-    const teachersSnap = await getDocs(collection(db, 'teachers'));
-    if (teachersSnap.empty) {
-      console.log('Seeding initial teachers to Firestore...');
+    const teachersSnap = await getDocs(collection(db, 'teachers')).catch(() => null);
+    if (teachersSnap && teachersSnap.empty) {
       for (const t of DEFAULT_TEACHERS) {
-        await setDoc(doc(db, 'teachers', t.id), t);
+        await setDoc(doc(db, 'teachers', t.id), t, { merge: true }).catch(() => {});
       }
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, 'seed');
+    console.warn('Initial seeding skipped:', error);
   }
 }
 
@@ -177,7 +181,14 @@ export function subscribeStudents(callback: (students: Student[]) => void) {
   return onSnapshot(
     collection(db, 'students'),
     (snapshot) => {
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Student));
+      const list = snapshot.docs
+        .map(d => ({ ...d.data(), id: d.id } as Student))
+        .filter(s => {
+          if (!s.id) return false;
+          // Filter out system auto-generated mock roster students
+          if (s.id.startsWith('st-roster-') || ['budi', 'siti', 'andi', 'prama'].includes(s.id)) return false;
+          return true;
+        });
       callback(list);
     },
     (error) => {
@@ -205,7 +216,14 @@ export function subscribeStories(callback: (stories: Story[]) => void) {
   return onSnapshot(
     collection(db, 'stories'),
     (snapshot) => {
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Story));
+      const list = snapshot.docs
+        .map(d => ({ ...d.data(), id: d.id } as Story))
+        .filter(s => {
+          if (!s.id) return false;
+          if (s.id.startsWith('story-mock-')) return false;
+          if (s.studentId && (s.studentId.startsWith('st-roster-') || ['budi', 'siti', 'andi', 'prama'].includes(s.studentId))) return false;
+          return true;
+        });
       // Sort newest first
       list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       callback(list);
@@ -243,7 +261,7 @@ export async function saveStoryToFirestore(storyData: Omit<Story, 'id'> & { id?:
 export async function updateStudentInFirestore(studentId: string, updates: Partial<Student>) {
   try {
     const ref = doc(db, 'students', studentId);
-    await updateDoc(ref, updates);
+    await setDoc(ref, updates, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `students/${studentId}`);
     throw error;
@@ -336,7 +354,7 @@ export async function deleteStoryFromFirestore(storyId: string) {
 export async function updateTeacherInFirestore(teacherId: string, updates: Partial<Teacher>) {
   try {
     const ref = doc(db, 'teachers', teacherId);
-    await updateDoc(ref, updates);
+    await setDoc(ref, updates, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `teachers/${teacherId}`);
     throw error;
@@ -357,7 +375,7 @@ export async function updateGuruNoteInFirestore(storyId: string, guruNote: strin
     if (attendance) {
       updates.attendance = attendance;
     }
-    await updateDoc(ref, updates);
+    await setDoc(ref, updates, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `stories/${storyId}`);
     throw error;
@@ -368,10 +386,10 @@ export async function updateGuruNoteInFirestore(storyId: string, guruNote: strin
 export async function escalateStoryInFirestore(storyId: string) {
   try {
     const ref = doc(db, 'stories', storyId);
-    await updateDoc(ref, {
+    await setDoc(ref, {
       escalated: true,
       status: 'Butuh Bantuan'
-    });
+    }, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `stories/${storyId}`);
     throw error;
@@ -382,10 +400,10 @@ export async function escalateStoryInFirestore(storyId: string) {
 export async function unescalateStoryInFirestore(storyId: string) {
   try {
     const ref = doc(db, 'stories', storyId);
-    await updateDoc(ref, {
+    await setDoc(ref, {
       escalated: false,
       status: 'Selesai Direfleksi'
-    });
+    }, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `stories/${storyId}`);
     throw error;
@@ -396,11 +414,11 @@ export async function unescalateStoryInFirestore(storyId: string) {
 export async function updateCounselorNoteInFirestore(storyId: string, counselorNote: string) {
   try {
     const ref = doc(db, 'stories', storyId);
-    await updateDoc(ref, {
+    await setDoc(ref, {
       counselorNote,
       escalated: true,
       status: 'Butuh Bantuan'
-    });
+    }, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `stories/${storyId}`);
     throw error;
@@ -411,9 +429,9 @@ export async function updateCounselorNoteInFirestore(storyId: string, counselorN
 export async function resolveStoryInFirestore(storyId: string) {
   try {
     const ref = doc(db, 'stories', storyId);
-    await updateDoc(ref, {
+    await setDoc(ref, {
       status: 'Teratasi'
-    });
+    }, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `stories/${storyId}`);
     throw error;
