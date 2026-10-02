@@ -1465,12 +1465,25 @@ export default function App() {
   // Student specific history
   const studentStories = stories.filter(s => s.studentId === selectedStudent?.id);
 
+  // Helper to extract emotion cleanly from any story record
+  const getCleanEmotion = (story: Story | any): string => {
+    const feeling = (story?.feeling || '').toLowerCase();
+    const charId = (story?.character || '').toLowerCase();
+    if (feeling.includes('marah') || charId === 'koko') return 'Marah';
+    if (feeling.includes('sedih') || charId === 'sasa') return 'Sedih';
+    if (feeling.includes('gembira') || feeling.includes('senang') || charId === 'giga') return 'Gembira';
+    if (feeling.includes('takut') || feeling.includes('cemas') || charId === 'pipi') return 'Takut';
+    if (feeling.includes('bangga') || feeling.includes('puas') || charId === 'caca') return 'Bangga';
+    return 'Gembira';
+  };
+
   // Statistics Calculation
   const latestStoriesCount = teacherStories.length;
-  const moodCounts = teacherStories.reduce((acc: any, curr) => {
-    acc[curr.feeling] = (acc[curr.feeling] || 0) + 1;
+  const moodCounts = teacherStories.reduce((acc: Record<string, number>, curr) => {
+    const emo = getCleanEmotion(curr);
+    acc[emo] = (acc[emo] || 0) + 1;
     return acc;
-  }, {});
+  }, { Marah: 0, Sedih: 0, Gembira: 0, Takut: 0, Bangga: 0 });
 
   const activeEscalatedStories = teacherStories.filter(s => s.escalated && s.status !== 'Teratasi');
 
@@ -3309,22 +3322,47 @@ export default function App() {
                 </div>
 
                 {/* Mood Spread bar */}
-                <div>
-                  <h4 className="text-[10px] font-bold text-slate-500 uppercase mb-2">Sebaran Emosi Murid saat ini:</h4>
-                  <div className="flex flex-col gap-2">
+                <div className="bg-slate-50/80 rounded-xl p-3.5 border border-slate-200">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <h4 className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <span>📊</span> Sebaran Emosi Murid (% & Jumlah)
+                    </h4>
+                    <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full">
+                      {latestStoriesCount} Cerita
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-2.5">
                     {CHARACTERS.map((char) => {
                       const count = moodCounts[char.emotion] || 0;
                       const percentage = latestStoriesCount > 0 ? (count / latestStoriesCount) * 100 : 0;
+                      const emojiIcon = 
+                        char.emotion === 'Marah' ? '🔥' :
+                        char.emotion === 'Sedih' ? '💧' :
+                        char.emotion === 'Gembira' ? '⭐' :
+                        char.emotion === 'Takut' ? '🟣' : '🌿';
+
                       return (
-                        <div key={char.id} className="flex items-center gap-2 text-xs">
-                          <span className="w-16 font-bold text-slate-600 truncate">{char.emotion}</span>
-                          <div className="flex-1 h-3 bg-slate-100 rounded-full overflow-hidden">
+                        <div key={char.id} className="flex flex-col gap-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-extrabold text-slate-700 flex items-center gap-1.5">
+                              <span>{emojiIcon}</span>
+                              <span>{char.emotion}</span>
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-indigo-700 font-mono text-xs">
+                                {percentage.toFixed(0)}%
+                              </span>
+                              <span className="text-[10px] font-bold text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200 shadow-xs">
+                                {count} murid
+                              </span>
+                            </div>
+                          </div>
+                          <div className="w-full h-2.5 bg-slate-200/80 rounded-full overflow-hidden p-0.5">
                             <div 
-                              className={`h-full bg-gradient-to-r ${char.color} transition-all`}
-                              style={{ width: `${percentage}%` }}
+                              className={`h-full rounded-full bg-gradient-to-r ${char.color} transition-all duration-500`}
+                              style={{ width: `${Math.max(percentage, count > 0 ? 5 : 0)}%` }}
                             />
                           </div>
-                          <span className="w-6 font-bold text-slate-500 text-right">{count}</span>
                         </div>
                       );
                     })}
@@ -3508,16 +3546,32 @@ export default function App() {
                           </div>
 
                           <div className="w-full md:w-auto shrink-0 flex flex-col gap-2">
-                            <button
-                              onClick={() => {
-                                setActiveStoryDetail(story);
-                                setTeacherReplyText(story.analysis?.rekomendasi_guru || '');
-                                playTone(440, 'sine', 0.1);
-                              }}
-                              className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-colors"
-                            >
-                              💬 Beri Tanggapan
-                            </button>
+                            <div className="flex gap-1.5 w-full">
+                              <button
+                                onClick={() => {
+                                  setActiveStoryDetail(story);
+                                  setTeacherReplyText(story.analysis?.rekomendasi_guru || '');
+                                  playTone(440, 'sine', 0.1);
+                                }}
+                                className="flex-1 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-colors"
+                              >
+                                💬 Beri Tanggapan
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveStoryDetail(story);
+                                  const aiDraft = story.analysis?.rekomendasi_guru || `Halo ${story.studentName}, terima kasih sudah berbagi cerita hebat hari ini. Pertahankan terus semangat positifmu!`;
+                                  setTeacherReplyText(aiDraft);
+                                  setTeacherScoreInput('90');
+                                  playTone(600, 'sine', 0.15);
+                                }}
+                                className="px-3 py-2 bg-sky-100 hover:bg-sky-200 text-sky-800 font-extrabold text-xs rounded-xl border border-sky-300 shadow-sm flex items-center justify-center gap-1 transition-colors"
+                                title="Minta bantuan AI untuk mengisi tanggapan dan nilai otomatis"
+                              >
+                                ✨ Minta Bantuan AI
+                              </button>
+                            </div>
 
                             <button
                               type="button"
