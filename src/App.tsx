@@ -57,6 +57,7 @@ import {
   updateStudentInFirestore,
   saveCustomStudentLocally,
   registerTeacherToFirestore,
+  saveCustomTeacherLocally,
   deleteTeacherFromFirestore,
   markTeacherDeletedLocally,
   updateTeacherInFirestore,
@@ -1461,6 +1462,7 @@ export default function App() {
     showToast(`✅ Perubahan data Guru "${cleanName}" berhasil disimpan!`);
 
     // 2. Async sync
+    saveCustomTeacherLocally(updatedTeacher);
     try {
       await updateTeacherInFirestore(editingTeacher.id, {
         name: cleanName,
