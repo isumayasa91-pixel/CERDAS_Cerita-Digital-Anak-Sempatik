@@ -61,7 +61,6 @@ import {
   unescalateStoryInFirestore,
   updateCounselorNoteInFirestore,
   resolveStoryInFirestore,
-  syncAllStudentsGuruWali,
   Student,
   Teacher,
   Story
@@ -1207,6 +1206,10 @@ export default function App() {
 
   // Admin deletes teacher
   const handleAdminDeleteTeacher = async (teacherId: string, teacherName: string) => {
+    if (teacherId === 't-bk') {
+      alert("Akun Guru BK (Ni Made Medi Astuti) tidak dapat dihapus karena merupakan akun sistem penting.");
+      return;
+    }
     if (!window.confirm(`Hapus akun guru "${teacherName}" dari Cloud Firestore?`)) return;
     try {
       await deleteTeacherFromFirestore(teacherId);
@@ -1372,7 +1375,7 @@ export default function App() {
     if (targetTeacher) {
       const teacherNameLower = targetTeacher.name.toLowerCase();
       // Match by assigned guruWali
-      if (stGuru && (stGuru.includes(teacherNameLower) || teacherNameLower.includes(stGuru) || stGuru.includes(targetName) || targetName.includes(stGuru))) {
+      if (stGuru && stGuru === teacherNameLower) {
         return true;
       }
 
@@ -4430,15 +4433,6 @@ export default function App() {
               </div>
 
               <div className="flex gap-2">
-                <button
-                  onClick={async () => {
-                    await syncAllStudentsGuruWali();
-                    alert('Data Guru Wali berhasil disinkronisasi!');
-                  }}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl border border-emerald-400 flex items-center gap-1.5 transition-colors self-end md:self-auto"
-                >
-                  <RefreshCw className="w-4 h-4" /> Sinkronisasi Wali
-                </button>
                 <button
                   onClick={handleAdminLogout}
                   className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 flex items-center gap-1.5 transition-colors self-end md:self-auto"

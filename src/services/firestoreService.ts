@@ -147,6 +147,7 @@ export async function seedFullRoster465StudentsToFirestore(): Promise<number> {
 
   let count = 0;
   try {
+    const batch = writeBatch(db);
     for (const cls of classes) {
       // 31 students per class x 15 classes = 465 students
       for (let i = 1; i <= 31; i++) {
@@ -166,10 +167,11 @@ export async function seedFullRoster465StudentsToFirestore(): Promise<number> {
           createdAt: new Date().toISOString()
         };
 
-        await setDoc(doc(db, 'students', studentId), newStudent);
+        batch.set(doc(db, 'students', studentId), newStudent);
         count++;
       }
     }
+    await batch.commit();
     return count;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, 'bulk-students');
@@ -271,36 +273,36 @@ export async function updateStudentInFirestore(studentId: string, updates: Parti
 
 
 // Sync all students guruWali based on class-teacher assignment from teachers collection
-export async function syncAllStudentsGuruWali(): Promise<void> {
-  try {
-    const studentsSnap = await getDocs(collection(db, 'students'));
-    const teachersSnap = await getDocs(collection(db, 'teachers'));
-    const teachers = teachersSnap.docs.map(d => d.data() as Teacher);
-
-    const batch = writeBatch(db);
-    let updatesCount = 0;
-
-    for (const studentDoc of studentsSnap.docs) {
-      const student = { ...studentDoc.data(), id: studentDoc.id } as Student;
-      // Skip system auto-generated mock roster students
-      if (student.id.startsWith('st-roster-') || ['budi', 'siti', 'andi', 'prama'].includes(student.id)) continue;
-
-      // Find teacher assigned to this class
-      const teacher = teachers.find(t => t.class && t.class.includes(student.class) && !t.class.includes('BK'));
-      if (teacher && teacher.name !== student.guruWali) {
-        batch.update(doc(db, 'students', student.id), { guruWali: teacher.name });
-        updatesCount++;
-      }
-    }
-
-    if (updatesCount > 0) {
-      await batch.commit();
-    }
-  } catch (error) {
-    console.error('Error syncing guruWali:', error);
-    throw error;
-  }
-}
+// export async function syncAllStudentsGuruWali(): Promise<void> {
+//   try {
+//     const studentsSnap = await getDocs(collection(db, 'students'));
+//     const teachersSnap = await getDocs(collection(db, 'teachers'));
+//     const teachers = teachersSnap.docs.map(d => d.data() as Teacher);
+//
+//     const batch = writeBatch(db);
+//     let updatesCount = 0;
+//
+//     for (const studentDoc of studentsSnap.docs) {
+//       const student = { ...studentDoc.data(), id: studentDoc.id } as Student;
+//       // Skip system auto-generated mock roster students
+//       if (student.id.startsWith('st-roster-') || ['budi', 'siti', 'andi', 'prama'].includes(student.id)) continue;
+//
+//       // Find teacher assigned to this class
+//       const teacher = teachers.find(t => t.class && t.class.includes(student.class) && !t.class.includes('BK'));
+//       if (teacher && teacher.name !== student.guruWali) {
+//         batch.update(doc(db, 'students', student.id), { guruWali: teacher.name });
+//         updatesCount++;
+//       }
+//     }
+//
+//     if (updatesCount > 0) {
+//       await batch.commit();
+//     }
+//   } catch (error) {
+//     console.error('Error syncing guruWali:', error);
+//     throw error;
+//   }
+// }
 
 // Add Student
 export async function addStudentToFirestore(studentData: { name: string; class: string; avatar: string; guruWali?: string }): Promise<Student> {
