@@ -1388,6 +1388,8 @@ export default function App() {
     return false;
   });
 
+  const teacherClassesLabel = Array.from(new Set(teacherStudents.map(s => s.class))).join(', ') || currentTeacher?.class || 'Binaan';
+
   // Student specific history
   const studentStories = stories.filter(s => s.studentId === selectedStudent?.id);
 
@@ -1702,6 +1704,21 @@ export default function App() {
                         <p className="text-[10px] text-slate-600 truncate">👩‍🏫 Guru Wali: <span className="font-semibold text-slate-800">{selectedStudent.guruWali || 'Belum dipilih'}</span></p>
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditStudentName(selectedStudent.name);
+                        setEditStudentClass(selectedStudent.class);
+                        setEditStudentGuruWali(selectedStudent.guruWali || '');
+                        setEditStudentAvatar(selectedStudent.avatar || '👦');
+                        setEditingStudent(selectedStudent);
+                        playTone(440, 'sine', 0.1);
+                      }}
+                      className="px-2 py-1 bg-white hover:bg-sky-100 text-sky-700 rounded-lg border border-sky-200 text-[10px] font-extrabold shadow-2xs transition-colors shrink-0 cursor-pointer"
+                      title="Edit Nama atau Profilmu"
+                    >
+                      ✏️ Edit Nama
+                    </button>
                   </div>
                 )}
 
@@ -1870,12 +1887,27 @@ export default function App() {
                             <p className="text-slate-800 text-sm md:text-base max-w-xl font-semibold leading-relaxed">
                               Selamat datang di Ruang CERDAS! Hari ini aku siap menceritakan pengalamanku dan memilih karakter emosi favoritku. Karakter emosi lucumu sudah siap mendengarkan cerita indahmu lho!
                             </p>
-                            <button
-                              onClick={() => { setActiveTab('story_builder'); setStep(1); playTone(523.25, 'sine', 0.2); }}
-                              className="mt-4 px-6 py-2.5 bg-sky-600 text-white font-extrabold text-sm rounded-full shadow-lg shadow-sky-700/20 hover:scale-105 transition-transform flex items-center gap-2 mx-auto md:mx-0"
-                            >
-                              🚀 Tulis Ceritaku Hari Ini!
-                            </button>
+                            <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 mt-4">
+                              <button
+                                onClick={() => { setActiveTab('story_builder'); setStep(1); playTone(523.25, 'sine', 0.2); }}
+                                className="px-6 py-2.5 bg-sky-600 text-white font-extrabold text-sm rounded-full shadow-lg shadow-sky-700/25 hover:scale-105 transition-transform flex items-center gap-2 cursor-pointer"
+                              >
+                                🚀 Tulis Ceritaku Hari Ini!
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditStudentName(selectedStudent.name);
+                                  setEditStudentClass(selectedStudent.class);
+                                  setEditStudentGuruWali(selectedStudent.guruWali || '');
+                                  setEditStudentAvatar(selectedStudent.avatar || '👦');
+                                  setEditingStudent(selectedStudent);
+                                  playTone(440, 'sine', 0.1);
+                                }}
+                                className="px-5 py-2.5 bg-white/90 hover:bg-white text-slate-800 font-extrabold text-xs rounded-full border border-sky-300 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                              >
+                                ✏️ Edit Nama / Profilku
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -3183,7 +3215,7 @@ export default function App() {
               {/* Stats Overview */}
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
                 <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-1.5">
-                  <TrendingUp className="w-4 h-4 text-indigo-500" /> Dashboard Kelas 4A & 4B
+                  <TrendingUp className="w-4 h-4 text-indigo-500" /> Dashboard Kelas {teacherClassesLabel}
                 </h3>
                 
                 <div className="grid grid-cols-2 gap-3 mb-4">
