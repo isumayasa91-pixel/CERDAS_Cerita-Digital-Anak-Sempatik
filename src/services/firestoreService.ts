@@ -52,12 +52,7 @@ export interface Story {
   attendance?: string;
 }
 
-const DEFAULT_STUDENTS: Student[] = [
-  { id: 'budi', name: 'Budi Setiawan', class: 'Kelas VII A', avatar: '👦', status: 'Aktif', guruWali: 'I Nyoman Gede Juwastra, S.Sn', createdAt: new Date().toISOString() },
-  { id: 'siti', name: 'Siti Rahma', class: 'Kelas VII A', avatar: '👧', status: 'Aktif', guruWali: 'I Nyoman Gede Juwastra, S.Sn', createdAt: new Date().toISOString() },
-  { id: 'andi', name: 'Andi Prasetyo', class: 'Kelas VIII B', avatar: '🧑', status: 'Aktif', guruWali: 'Bapak I Sumayasa, M.Pd', createdAt: new Date().toISOString() },
-  { id: 'prama', name: 'I GEDE PRAMA PUTRA ANTARA', class: 'Kelas VII A', avatar: '👦', status: 'Aktif', guruWali: 'I Nyoman Gede Juwastra, S.Sn', createdAt: new Date().toISOString() },
-];
+const DEFAULT_STUDENTS: Student[] = [];
 
 const DEFAULT_TEACHERS: Teacher[] = [
   { id: 't-1', name: 'I Nyoman Gede Juwastra, S.Sn', email: 'nyoman@cerdas.id', password: 'password123', class: 'Kelas VII A', createdAt: new Date().toISOString() },
@@ -68,90 +63,41 @@ const DEFAULT_TEACHERS: Teacher[] = [
   { id: 't-5', name: 'Ibu Sri Wahyuni, S.Pd', email: 'sri@cerdas.id', password: 'password123', class: 'Umum', createdAt: new Date().toISOString() },
 ];
 
-const DEFAULT_STORIES: Story[] = [
-  {
-    id: 'story-mock-1',
-    studentId: 'budi',
-    studentName: 'Budi Setiawan',
-    timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000 * 2).toISOString(),
-    fact: 'Tadi siang aku bertengkar dengan Andi di kelas karena kami berebut lego helikopter. Aku kesal sekali dan merebutnya dari tangan Andi.',
-    feeling: 'Marah',
-    character: 'Koko',
-    finding: 'Lego di kelas itu milik bersama, bukan milikku sendiri. Seharusnya aku mengantre atau memainkannya bersama Andi.',
-    future: 'Besok pagi aku mau menemui Andi di kelas dan minta maaf. Aku juga mau mengajaknya merakit lego helikopter itu bersama-sama.',
-    audioBase64: '',
-    guruNote: 'Hebat Budi sudah menyadari kesalahannya dan berani berniat meminta maaf langsung ke Andi. Pertahankan sikap ksatria ini ya!',
-    counselorNote: '',
-    escalated: false,
-    status: 'Selesai Direfleksi',
-    aiRecommendation: 'Apresiasi keberanian Budi mengakui kesalahan. Ajak Budi berlatih teknik pernapasan saat emosi marah mulai muncul sebelum bertindak.',
-    score: 88,
-    attendance: 'Hadir'
-  },
-  {
-    id: 'story-mock-2',
-    studentId: 'siti',
-    studentName: 'Siti Rahma',
-    timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000 * 1).toISOString(),
-    fact: 'Aku merasa sedih karena tugas kelompok Matematika kemarin belum selesai dan teman-temanku belum mengirimkan bagian mereka.',
-    feeling: 'Sedih',
-    character: 'Mimi',
-    finding: 'Komunikasi di awal kelompok sangat penting. Jika ada kendala, aku sebaiknya bertanya langsung ke guru atau berdiskusi lebih awal.',
-    future: 'Aku akan mengingatkan teman-teman di grup WhatsApp dengan ramah dan mengajak belajar bersama nanti sore di perpustakaan.',
-    audioBase64: '',
-    guruNote: '',
-    counselorNote: '',
-    escalated: false,
-    status: 'Menunggu Diperiksa',
-    aiRecommendation: 'Berikan penguatan pada inisiatif kepemimpinan Siti. Dorong Siti untuk membagi tugas secara adil dengan tenggat waktu yang jelas.',
-    score: 85,
-    attendance: 'Hadir'
-  },
-  {
-    id: 'story-mock-3',
-    studentId: 'andi',
-    studentName: 'Andi Prasetyo',
-    timestamp: new Date().toISOString(),
-    fact: 'Kemarin ada siswa kelas lain yang mengejek penampilanku saat upacara bendera di lapangan. Aku merasa sangat malu dan takut ke sekolah hari ini.',
-    feeling: 'Takut',
-    character: 'Giga',
-    finding: 'Ejekan orang lain tidak mencerminkan nilai diriku. Aku berhak merasa aman di sekolah dan tidak boleh memendamnya sendirian.',
-    future: 'Aku memberanikan diri menulis ini di CERDAS agar Guru Wali dan Guru BK dapat membantuku merasa lebih aman.',
-    audioBase64: '',
-    guruNote: 'Terima kasih sudah bercerita secara jujur Andi. Bapak akan segera berkoordinasi dengan Guru BK untuk mendampingi kamu.',
-    counselorNote: 'Andi telah dijadwalkan sesi konseling suportif di ruang BK hari Rabu pukul 09.00. Pendampingan berkelanjutan telah dimulai.',
-    escalated: false,
-    status: 'Selesai Direfleksi',
-    aiRecommendation: 'Perlu intervensi suportif segera dari Guru BK untuk memberikan ruang aman dan mengidentifikasi potensi perundungan (bullying).',
-    score: 90,
-    attendance: 'Hadir'
+const DEFAULT_STORIES: Story[] = [];
+
+// Cleanup mock/auto-generated students and stories
+export async function cleanupMockStudentsAndStories() {
+  try {
+    const studentsSnap = await getDocs(collection(db, 'students'));
+    const storiesSnap = await getDocs(collection(db, 'stories'));
+
+    for (const docSnap of studentsSnap.docs) {
+      const id = docSnap.id;
+      if (['budi', 'siti', 'andi', 'prama'].includes(id) || id.startsWith('st-roster-')) {
+        await deleteDoc(doc(db, 'students', id));
+      }
+    }
+    for (const storyDoc of storiesSnap.docs) {
+      const id = storyDoc.id;
+      if (id.startsWith('story-mock-')) {
+        await deleteDoc(doc(db, 'stories', id));
+      }
+    }
+  } catch (error) {
+    console.error('Error cleaning up mock students:', error);
   }
-];
+}
 
 // Seed initial data if collections are empty
 export async function seedInitialFirestoreData() {
   try {
-    const studentsSnap = await getDocs(collection(db, 'students'));
-    if (studentsSnap.empty) {
-      console.log('Seeding initial students to Firestore...');
-      for (const st of DEFAULT_STUDENTS) {
-        await setDoc(doc(db, 'students', st.id), st);
-      }
-    }
+    await cleanupMockStudentsAndStories();
 
     const teachersSnap = await getDocs(collection(db, 'teachers'));
     if (teachersSnap.empty) {
       console.log('Seeding initial teachers to Firestore...');
       for (const t of DEFAULT_TEACHERS) {
         await setDoc(doc(db, 'teachers', t.id), t);
-      }
-    }
-
-    const storiesSnap = await getDocs(collection(db, 'stories'));
-    if (storiesSnap.empty) {
-      console.log('Seeding initial stories to Firestore...');
-      for (const s of DEFAULT_STORIES) {
-        await setDoc(doc(db, 'stories', s.id), s);
       }
     }
   } catch (error) {
