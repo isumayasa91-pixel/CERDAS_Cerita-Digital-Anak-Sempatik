@@ -268,6 +268,30 @@ export async function updateStudentInFirestore(studentId: string, updates: Parti
   }
 }
 
+// Sync all students guruWali based on class-teacher assignment from teachers collection
+export async function syncAllStudentsGuruWali(): Promise<void> {
+  try {
+    const studentsSnap = await getDocs(collection(db, 'students'));
+    const teachersSnap = await getDocs(collection(db, 'teachers'));
+    const teachers = teachersSnap.docs.map(d => d.data() as Teacher);
+
+    for (const studentDoc of studentsSnap.docs) {
+      const student = { ...studentDoc.data(), id: studentDoc.id } as Student;
+      // Skip system auto-generated mock roster students
+      if (student.id.startsWith('st-roster-') || ['budi', 'siti', 'andi', 'prama'].includes(student.id)) continue;
+
+      // Find teacher assigned to this class
+      const teacher = teachers.find(t => t.class && t.class.includes(student.class) && !t.class.includes('BK'));
+      if (teacher && teacher.name !== student.guruWali) {
+        await updateStudentInFirestore(student.id, { guruWali: teacher.name });
+      }
+    }
+  } catch (error) {
+    console.error('Error syncing guruWali:', error);
+    throw error;
+  }
+}
+
 // Add Student
 export async function addStudentToFirestore(studentData: { name: string; class: string; avatar: string; guruWali?: string }): Promise<Student> {
   const id = `student-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
