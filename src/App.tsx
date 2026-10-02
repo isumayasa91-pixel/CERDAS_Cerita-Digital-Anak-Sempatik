@@ -59,6 +59,7 @@ import {
   registerTeacherToFirestore,
   saveCustomTeacherLocally,
   deleteTeacherFromFirestore,
+  bulkDeleteDemoStudents,
   markTeacherDeletedLocally,
   updateTeacherInFirestore,
   updateGuruNoteInFirestore,
@@ -433,7 +434,7 @@ export default function App() {
   // Initialize Real-time Firestore Subscriptions and Seeding
   useEffect(() => {
     // Seed initial data if database is brand new
-    seedInitialFirestoreData();
+    // seedInitialFirestoreData();
 
     // 1. Real-time Students subscription
     const unsubStudents = subscribeStudents((dataStudents) => {
@@ -5106,6 +5107,17 @@ export default function App() {
                       <Plus className="w-4 h-4" /> Daftarkan Murid ke Cloud
                     </button>
                   </form>
+                  <button
+                    onClick={async () => {
+                      if (confirm('Apakah Anda yakin ingin menghapus semua data murid demo secara permanen?')) {
+                        await bulkDeleteDemoStudents();
+                        alert('Data murid demo telah dihapus.');
+                      }
+                    }}
+                    className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl font-bold text-xs border border-rose-200 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" /> Hapus Semua Murid Demo
+                  </button>
                 </div>
 
                 {/* List of Students */}

@@ -147,6 +147,28 @@ export async function seedFullRoster465StudentsToFirestore(): Promise<number> {
   }
 }
 
+// Bulk delete demo students
+export async function bulkDeleteDemoStudents(): Promise<void> {
+  try {
+    const q = query(collection(db, 'students'));
+    const snapshot = await getDocs(q);
+    const batch = writeBatch(db);
+    let count = 0;
+    snapshot.forEach((doc) => {
+      if (doc.id.startsWith('st-roster-')) {
+        batch.delete(doc.ref);
+        count++;
+      }
+    });
+    if (count > 0) {
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, 'bulk-delete-demo');
+    throw error;
+  }
+}
+
 // Local deletion and custom persistence for students
 export function getDeletedStudentIds(): string[] {
   try {
