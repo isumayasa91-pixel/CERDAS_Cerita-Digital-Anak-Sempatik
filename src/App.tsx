@@ -236,7 +236,8 @@ export default function App() {
   
   // Murid state variables
   const [activeTab, setActiveTab] = useState<'profile' | 'history' | 'story_builder'>('profile');
-  const [step, setStep] = useState(1); // 1 to 4 (Fact, Feeling, Finding, Future), 5 is Review/Success
+  const [step, setStep] = useState(1); // 1: Fact, 2: Feeling, 3: Finding, 4: Future, 5: Review/Edit, 6: Success
+  const [editingStoryId, setEditingStoryId] = useState<string | null>(null);
   const [factText, setFactText] = useState('');
   const [selectedFeeling, setSelectedFeeling] = useState<string>('Gembira');
   const [feelingReasonText, setFeelingReasonText] = useState('');
@@ -454,22 +455,39 @@ export default function App() {
     }
   }, [students]);
 
-  // Set default guruWali only if not yet set, respecting the teacher chosen by the student
+  // Ensure every student's guruWali matches a registered teacher from portal admin
   useEffect(() => {
+    if (teachers.length === 0 || students.length === 0) return;
+    const validTeacherNames = new Set(teachers.map(t => t.name));
+
     students.forEach(st => {
+      const isInvalid = 
+        !st.guruWali || 
+        st.guruWali.includes('Rahma') || 
+        st.guruWali.includes('Deni Saputra') || 
+        !validTeacherNames.has(st.guruWali);
+
       const isPrama = st.name.toUpperCase().includes('I GEDE PRAMA PUTRA ANTARA');
-      if (!st.guruWali || (isPrama && st.class !== 'Kelas VII A')) {
-        const expectedGuru = 
-          st.class === 'Kelas VII A' ? 'I Nyoman Gede Juwastra, S.Sn' :
-          st.class.startsWith('Kelas VIII') ? 'I Wayan Sumayasa, S.Pd' :
-          st.class.startsWith('Kelas IX') ? 'Ni Luh Ayu Evalentin, S.Pd' : 'I Nyoman Gede Juwastra, S.Sn';
-        updateStudentInFirestore(st.id, { 
-          ...(st.guruWali ? {} : { guruWali: expectedGuru }),
-          ...(isPrama && st.class !== 'Kelas VII A' ? { class: 'Kelas VII A' } : {}) 
+
+      if (isInvalid || (isPrama && st.class !== 'Kelas VII A')) {
+        // Find matching teacher from portal admin teachers whose class includes st.class
+        const matchedTeacher = 
+          teachers.find(t => !t.class?.includes('BK') && t.class && t.class.includes(st.class)) ||
+          teachers.find(t => !t.class?.includes('BK') && (
+            (st.class.startsWith('Kelas VII') && t.class?.includes('Kelas VII')) ||
+            (st.class.startsWith('Kelas VIII') && t.class?.includes('Kelas VIII')) ||
+            (st.class.startsWith('Kelas IX') && t.class?.includes('Kelas IX'))
+          ));
+
+        const fallbackGuru = matchedTeacher ? matchedTeacher.name : 'I Wayan Sumayasa, S.Pd';
+
+        updateStudentInFirestore(st.id, {
+          ...(isInvalid ? { guruWali: fallbackGuru } : {}),
+          ...(isPrama && st.class !== 'Kelas VII A' ? { class: 'Kelas VII A' } : {})
         });
       }
     });
-  }, [students]);
+  }, [students, teachers]);
 
   // Ensure Guru BK Ni Made Medi Astuti, S.Pd., M.Pd is present in teachers collection
   useEffect(() => {
@@ -582,7 +600,7 @@ export default function App() {
 
   // Sound effects helper for step traversal
   const playStepSound = (currentStep: number) => {
-    const freqs = [261.63, 329.63, 392.00, 523.25, 659.25]; // C, E, G, C5, E5
+    const freqs = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99]; // C, E, G, C5, E5, G5
     if (freqs[currentStep - 1]) {
       playTone(freqs[currentStep - 1], 'sine', 0.15);
     }
@@ -611,9 +629,9 @@ export default function App() {
 
   // Submit story handler
   const handleStorySubmit = async () => {
-    if (!factText.trim() || !findingText.trim() || !futureText.trim()) {
-      alert("Harap isi seluruh refleksi 4F dengan lengkap!");
-      return;
+    // If student is still recording voice note, stop recording
+    if (isRecording && mediaRecorderRef.current) {
+      stopRecording();
     }
 
     if (!selectedStudent) {
@@ -621,10 +639,29 @@ export default function App() {
       return;
     }
 
+    // Check if both text and voice note are empty
+    if (!factText.trim() && !recordedAudio) {
+      alert("Harap tuliskan ceritamu atau rekam suara dengan Voice Note terlebih dahulu sebelum menyimpan!");
+      return;
+    }
+
     setIsSubmitting(true);
     const activeChar = CHARACTERS.find(c => c.emotion === selectedFeeling);
 
     try {
+      // Friendly defaults if student used Voice Note or only filled partial steps
+      const finalFact = factText.trim() 
+        ? factText.trim() 
+        : (recordedAudio ? "🎙️ [Refleksi Cerita Menggunakan Rekaman Suara / Voice Note Murid]" : "Pengalaman hari ini.");
+      
+      const finalFinding = findingText.trim() 
+        ? findingText.trim() 
+        : (recordedAudio ? "Pembelajaran terekam dalam rekaman suara murid." : "Belajar hal berharga dan bijak dari peristiwa yang dialami.");
+      
+      const finalFuture = futureText.trim() 
+        ? futureText.trim() 
+        : (recordedAudio ? `Rencana tema ${futureTopic} terekam dalam pesan suara.` : "Besok saya akan bersemangat dan berusaha melakukan yang terbaik.");
+
       let aiRecommendation = '';
       try {
         const response = await fetch('/api/generate-recommendation', {
@@ -632,10 +669,10 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             studentName: selectedStudent.name,
-            fact: factText,
+            fact: finalFact,
             feeling: selectedFeeling,
-            finding: findingText,
-            future: futureText
+            finding: finalFinding,
+            future: finalFuture
           })
         });
         if (response.ok) {
@@ -650,23 +687,29 @@ export default function App() {
         ? `${selectedFeeling} (Alasan: ${feelingReasonText.trim()})`
         : selectedFeeling;
 
-      await saveStoryToFirestore({
+      const storyPayload: any = {
         studentId: selectedStudent.id,
         studentName: selectedStudent.name,
-        guruWali: selectedStudent.guruWali || 'Ibu Rahma, S.Pd',
+        guruWali: selectedStudent.guruWali || 'I Wayan Sumayasa, S.Pd',
         timestamp: new Date().toISOString(),
-        fact: factText,
+        fact: finalFact,
         feeling: fullFeelingText,
         character: activeChar?.id || 'Giga',
-        finding: findingText,
-        future: futureText,
+        finding: finalFinding,
+        future: finalFuture,
         audioBase64: recordedAudio || '',
         guruNote: '',
         counselorNote: '',
         escalated: false,
         status: 'Menunggu Diperiksa',
         aiRecommendation: aiRecommendation
-      });
+      };
+
+      if (editingStoryId) {
+        storyPayload.id = editingStoryId;
+      }
+
+      await saveStoryToFirestore(storyPayload);
       
       // Play celebratory sound
       playTone(523.25, 'sine', 0.1);
@@ -675,9 +718,10 @@ export default function App() {
       setTimeout(() => playTone(1046.50, 'sine', 0.3), 300);
 
       setSuccessConfetti(true);
-      setStep(5); // Go to success page
+      setStep(6); // Go to success page
 
       // Reset fields
+      setEditingStoryId(null);
       setFactText('');
       setFeelingReasonText('');
       setFindingText('');
@@ -689,6 +733,27 @@ export default function App() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // Start editing an existing story from history
+  const handleStartEditStory = (story: any) => {
+    setEditingStoryId(story.id);
+    setFactText(story.fact || '');
+    // extract feeling and reason if formatted as "Feeling (Alasan: ...)"
+    const feelingMatch = story.feeling ? story.feeling.match(/^([^(]+)(?:\(Alasan:\s*(.+)\))?$/) : null;
+    if (feelingMatch) {
+      setSelectedFeeling(feelingMatch[1].trim());
+      setFeelingReasonText(feelingMatch[2] ? feelingMatch[2].replace(/\)$/, '').trim() : '');
+    } else {
+      setSelectedFeeling(story.feeling || 'Gembira');
+      setFeelingReasonText('');
+    }
+    setFindingText(story.finding || '');
+    setFutureText(story.future || '');
+    setRecordedAudio(story.audioBase64 || '');
+    setActiveTab('story_builder');
+    setStep(1);
+    playTone(523, 'sine', 0.1);
   };
 
   // Teacher reply submit handler
@@ -1886,36 +1951,86 @@ export default function App() {
                   {activeTab === 'story_builder' && (
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
                       
-                      {/* Step Progress Header */}
+                      {/* Step Progress Header with Interactive Clickable Tabs */}
                       <div className="bg-sky-50 border-b border-sky-100 px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4">
                         <div className="flex items-center gap-2">
                           <div className="bg-sky-500 text-white w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs">
-                            {step < 5 ? step : '✓'}
+                            {step < 6 ? step : '✓'}
                           </div>
                           <div>
-                            <p className="text-xs font-bold text-sky-500 uppercase tracking-wider">Langkah {step} dari 4</p>
+                            <p className="text-xs font-bold text-sky-500 uppercase tracking-wider">
+                              {step <= 4 ? `Langkah ${step} dari 4` : step === 5 ? 'Langkah 5 (Pratinjau)' : 'Selesai'}
+                            </p>
                             <h3 className="font-extrabold text-slate-800 text-base">
                               {step === 1 && "F - FACT (Kejadian Hari Ini)"}
                               {step === 2 && "F - FEELING (Perasaan Hatiku)"}
                               {step === 3 && "F - FINDING (Belajar Hal Hebat)"}
                               {step === 4 && "F - FUTURE (Rencana Hebat Besok)"}
-                              {step === 5 && "Hore! Cerita Dikirim!"}
+                              {step === 5 && "🔍 Pratinjau & Edit (Periksa Sebelum Kirim)"}
+                              {step === 6 && (editingStoryId ? "Perubahan Cerita Disimpan!" : "Hore! Cerita Dikirim!")}
                             </h3>
                           </div>
                         </div>
 
-                        {/* Visual Dots */}
-                        {step < 5 && (
-                          <div className="flex items-center gap-2">
-                            {[1, 2, 3, 4].map((sNum) => (
-                              <div
-                                key={sNum}
-                                className={`h-2.5 rounded-full transition-all ${step === sNum ? 'w-8 bg-sky-500' : 'w-2.5 bg-sky-200'}`}
-                              />
+                        {/* Interactive Clickable Tabs for Children to navigate & edit anytime */}
+                        {step < 6 && (
+                          <div className="flex items-center gap-1.5 overflow-x-auto py-1 max-w-full">
+                            {[
+                              { num: 1, label: '1. Fact', icon: '📅' },
+                              { num: 2, label: '2. Feeling', icon: '💖' },
+                              { num: 3, label: '3. Finding', icon: '💡' },
+                              { num: 4, label: '4. Future', icon: '🚀' },
+                              { num: 5, label: '5. Pratinjau', icon: '🔍' },
+                            ].map((s) => (
+                              <button
+                                key={s.num}
+                                type="button"
+                                onClick={() => {
+                                  setStep(s.num);
+                                  playStepSound(s.num);
+                                }}
+                                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                                  step === s.num
+                                    ? 'bg-sky-500 text-white shadow-sm ring-2 ring-sky-300'
+                                    : step > s.num
+                                    ? 'bg-sky-100 text-sky-800 hover:bg-sky-200'
+                                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                                }`}
+                                title={`Klik untuk melihat / mengedit langkah ${s.label}`}
+                              >
+                                <span>{s.icon}</span>
+                                <span>{s.label}</span>
+                              </button>
                             ))}
                           </div>
                         )}
                       </div>
+
+                      {/* Active Edit Mode Banner */}
+                      {editingStoryId && (
+                        <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 flex items-center justify-between text-xs text-amber-900">
+                          <div className="flex items-center gap-2">
+                            <span>✏️</span>
+                            <span className="font-bold">Mode Edit Cerita:</span>
+                            <span>Kamu sedang mengedit cerita yang sudah dikirim. Ubah bagian yang salah, lalu simpan.</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingStoryId(null);
+                              setFactText('');
+                              setFeelingReasonText('');
+                              setFindingText('');
+                              setFutureText('');
+                              setRecordedAudio('');
+                              setActiveTab('history');
+                            }}
+                            className="px-2.5 py-1 bg-white border border-amber-300 rounded-lg font-bold text-amber-800 hover:bg-amber-100 transition-colors"
+                          >
+                            Batal Edit
+                          </button>
+                        </div>
+                      )}
 
                       {/* Step Content Wrapper */}
                       <div className="p-6 flex-1 min-h-[420px] flex flex-col justify-between">
@@ -1946,6 +2061,17 @@ export default function App() {
                                   placeholder="Contoh: Dalam 1 bulan kebelakang ini, aku senang sekali saat kelompok IPA kami dipuji guru. Tapi dua minggu lalu aku sempat merasa sedih karena sepedaku bannya bocor saat mau berangkat sekolah..."
                                   className="w-full h-32 p-4 text-sm border-2 border-slate-200 rounded-2xl focus:border-sky-500 focus:outline-none transition-all leading-relaxed"
                                 />
+                                {factText.trim() && (
+                                  <div className="flex justify-end pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setFactText('')}
+                                      className="text-[11px] text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                                    >
+                                      <span>🗑️ Salah ketik? Hapus & tulis ulang</span>
+                                    </button>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Voice Recorder Block (Available on Every Step) */}
@@ -2064,6 +2190,17 @@ export default function App() {
                                   placeholder={`Ceritakan alasan kenapa kamu merasa ${selectedFeeling}... (misal: 'Aku memilih ${currentCharacter.name.split(' ')[0]} karena waktu itu temanku tidak mau berbagi mainan, jadi aku merasa kesal.')`}
                                   className="w-full h-24 p-3 text-xs border border-slate-200 rounded-xl focus:border-sky-500 focus:outline-none leading-relaxed bg-white"
                                 />
+                                {feelingReasonText.trim() && (
+                                  <div className="flex justify-end pt-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => setFeelingReasonText('')}
+                                      className="text-[11px] text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                                    >
+                                      <span>🗑️ Salah ketik? Hapus & tulis ulang alasan</span>
+                                    </button>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Quick chips for feeling reasons */}
@@ -2143,6 +2280,17 @@ export default function App() {
                                   placeholder="Contoh: Aku jadi belajar bahwa jika belum mengerti pelajaran, aku harus berani angkat tangan dan bertanya. Atau, aku belajar bahwa mengalah dan berbagi membuat hati lebih tenang..."
                                   className="w-full h-28 p-3.5 text-sm border-2 border-slate-200 rounded-2xl focus:border-rose-500 focus:outline-none transition-all leading-relaxed"
                                 />
+                                {findingText.trim() && (
+                                  <div className="flex justify-end pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setFindingText('')}
+                                      className="text-[11px] text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                                    >
+                                      <span>🗑️ Salah ketik? Hapus & tulis ulang pelajaran</span>
+                                    </button>
+                                  </div>
+                                )}
                               </div>
 
                               <div>
@@ -2313,6 +2461,17 @@ export default function App() {
                                 placeholder="Contoh: Rencanaku besok, aku mau bangun lebih pagi, menyapa teman-temanku di kelas dengan senyuman, dan mendoakan kebaikan untuk keluargaku..."
                                 className="w-full h-24 p-3.5 text-sm border-2 border-slate-200 rounded-2xl focus:border-sky-500 focus:outline-none transition-all leading-relaxed"
                               />
+                              {futureText.trim() && (
+                                <div className="flex justify-end pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setFutureText('')}
+                                    className="text-[11px] text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                                  >
+                                    <span>🗑️ Salah ketik? Hapus & tulis ulang rencana</span>
+                                  </button>
+                                </div>
+                              )}
                             </div>
 
                             {/* Voice Recorder Block for Future */}
@@ -2356,67 +2515,310 @@ export default function App() {
                           </div>
                         )}
 
-                        {/* Navigation controls within Wizard */}
-                        {step < 5 && (
-                          <div className="flex items-center justify-between border-t border-slate-100 pt-5 mt-6">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (step > 1) {
-                                  const s = step - 1;
-                                  setStep(s);
-                                  playStepSound(s);
-                                }
-                              }}
-                              disabled={step === 1}
-                              className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all ${step === 1 ? 'text-slate-300 bg-slate-50 cursor-not-allowed' : 'text-slate-600 bg-slate-100 hover:bg-slate-200'}`}
-                            >
-                              <ArrowLeft className="w-4 h-4" /> Kembali
-                            </button>
+                        {/* Navigation controls for Step 1 - 4 */}
+                        {step <= 4 && (
+                          <div className="flex flex-col gap-3 border-t border-slate-100 pt-5 mt-6">
+                            {/* Voice Note Active Shortcut Banner */}
+                            {recordedAudio && (
+                              <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-2xs">
+                                <div className="flex items-center gap-2.5">
+                                  <span className="p-2 bg-emerald-100 text-emerald-700 rounded-xl text-lg">🎙️</span>
+                                  <div>
+                                    <p className="text-xs font-extrabold text-emerald-900">Voice Note Aktif & Siap Disimpan!</p>
+                                    <p className="text-[10px] text-emerald-700">Kamu dapat langsung menyimpan ceritamu ke Guru Wali tanpa harus mengetik panjang.</p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setStep(5);
+                                    playStepSound(5);
+                                  }}
+                                  className="w-full sm:w-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer whitespace-nowrap"
+                                >
+                                  <span>🚀 Simpan Cerita via Voice Note (Langkah 5)</span>
+                                  <ArrowRight className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
 
-                            {step < 4 ? (
+                            <div className="flex items-center justify-between">
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const s = step + 1;
-                                  setStep(s);
-                                  playStepSound(s);
+                                  if (step > 1) {
+                                    const s = step - 1;
+                                    setStep(s);
+                                    playStepSound(s);
+                                  }
                                 }}
-                                className="px-5 py-2.5 bg-sky-500 text-white font-extrabold text-xs rounded-xl shadow-md hover:bg-sky-400 active:scale-95 transition-all flex items-center gap-1.5"
+                                disabled={step === 1}
+                                className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all ${step === 1 ? 'text-slate-300 bg-slate-50 cursor-not-allowed' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 cursor-pointer'}`}
                               >
-                                Lanjut <ArrowRight className="w-4 h-4" />
+                                <ArrowLeft className="w-4 h-4" /> Kembali Edit Langkah {step - 1}
                               </button>
-                            ) : (
+
+                              {step < 4 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const s = step + 1;
+                                    setStep(s);
+                                    playStepSound(s);
+                                  }}
+                                  className="px-5 py-2.5 bg-sky-500 text-white font-extrabold text-xs rounded-xl shadow-md hover:bg-sky-400 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  Lanjut Langkah {step + 1} <ArrowRight className="w-4 h-4" />
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setStep(5);
+                                    playStepSound(5);
+                                  }}
+                                  className="px-5 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-extrabold text-xs rounded-xl shadow-md hover:opacity-95 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <span>🔍 Periksa & Edit Cerita (Langkah 5)</span>
+                                  <ArrowRight className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* STEP 5: PRATINJAU & EDIT SEBELUM KIRIM */}
+                        {step === 5 && (
+                          <div className="flex flex-col gap-5 animate-fade-in w-full">
+                            <div className="bg-sky-50 border border-sky-200 p-4 rounded-2xl flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <span className="text-3xl p-2 bg-white rounded-2xl shadow-xs">🔍</span>
+                                <div>
+                                  <h4 className="text-sm font-extrabold text-slate-800">
+                                    Pratinjau & Periksa Ceritamu Sebelum Dikirim
+                                  </h4>
+                                  <p className="text-xs text-slate-600">
+                                    Baca kembali ceritamu di bawah ini. Jika ada salah ketik atau ingin diubah, klik tombol <strong className="text-sky-700 font-bold">"✏️ Edit Bagian Ini"</strong> untuk langsung memperbaikinya!
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* 1. FACT Card */}
+                              <div className="bg-white border-2 border-slate-200 hover:border-sky-300 rounded-2xl p-4 flex flex-col justify-between shadow-xs transition-all">
+                                <div>
+                                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                    <span className="font-extrabold text-xs text-slate-800 flex items-center gap-1.5">
+                                      <span>📅</span> 1. Kejadian (Fact)
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => { setStep(1); playStepSound(1); }}
+                                      className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 font-extrabold text-[11px] rounded-lg border border-sky-200 flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                                    >
+                                      ✏️ Edit Kejadian
+                                    </button>
+                                  </div>
+                                  <p className="text-xs text-slate-700 mt-2.5 leading-relaxed whitespace-pre-wrap">
+                                    {factText.trim() ? factText : <em className="text-slate-400">Belum ada tulisan kejadian (hanya rekaman suara).</em>}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* 2. FEELING Card */}
+                              <div className="bg-white border-2 border-slate-200 hover:border-sky-300 rounded-2xl p-4 flex flex-col justify-between shadow-xs transition-all">
+                                <div>
+                                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                    <span className="font-extrabold text-xs text-slate-800 flex items-center gap-1.5">
+                                      <span>💖</span> 2. Perasaan Hatiku (Feeling)
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => { setStep(2); playStepSound(2); }}
+                                      className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 font-extrabold text-[11px] rounded-lg border border-sky-200 flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                                    >
+                                      ✏️ Edit Perasaan
+                                    </button>
+                                  </div>
+                                  <div className="flex items-center gap-3 mt-2.5">
+                                    <div className="w-12 h-12 shrink-0">
+                                      {currentCharacter.svg}
+                                    </div>
+                                    <div className="truncate flex-1">
+                                      <p className="font-extrabold text-xs text-slate-800">
+                                        {currentCharacter.name} — <span className={currentCharacter.textColor}>{selectedFeeling}</span>
+                                      </p>
+                                      <p className="text-xs text-slate-600 mt-0.5 leading-snug line-clamp-2">
+                                        {feelingReasonText.trim() ? `Alasan: "${feelingReasonText}"` : <em className="text-slate-400">Tidak ada alasan tambahan</em>}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* 3. FINDING Card */}
+                              <div className="bg-white border-2 border-slate-200 hover:border-sky-300 rounded-2xl p-4 flex flex-col justify-between shadow-xs transition-all">
+                                <div>
+                                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                    <span className="font-extrabold text-xs text-slate-800 flex items-center gap-1.5">
+                                      <span>💡</span> 3. Pelajaran (Finding)
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => { setStep(3); playStepSound(3); }}
+                                      className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 font-extrabold text-[11px] rounded-lg border border-sky-200 flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                                    >
+                                      ✏️ Edit Pelajaran
+                                    </button>
+                                  </div>
+                                  <p className="text-xs text-slate-700 mt-2.5 leading-relaxed whitespace-pre-wrap">
+                                    {findingText.trim() ? findingText : <em className="text-slate-400">Belum ada tulisan pelajaran.</em>}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* 4. FUTURE Card */}
+                              <div className="bg-white border-2 border-slate-200 hover:border-sky-300 rounded-2xl p-4 flex flex-col justify-between shadow-xs transition-all">
+                                <div>
+                                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                    <span className="font-extrabold text-xs text-slate-800 flex items-center gap-1.5">
+                                      <span>🚀</span> 4. Rencana Besok (Future)
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => { setStep(4); playStepSound(4); }}
+                                      className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 font-extrabold text-[11px] rounded-lg border border-sky-200 flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                                    >
+                                      ✏️ Edit Rencana
+                                    </button>
+                                  </div>
+                                  <div className="mt-2.5">
+                                    <span className="text-[10px] font-bold bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full inline-block mb-1">
+                                      Tema: {futureTopic}
+                                    </span>
+                                    <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                      {futureText.trim() ? futureText : <em className="text-slate-400">Belum ada tulisan rencana.</em>}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Voice Recording in Step 5 */}
+                            <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-2xs">
+                              <div className="flex items-center gap-2.5">
+                                <span className="p-2 bg-emerald-100 text-emerald-700 rounded-xl text-xl">🎙️</span>
+                                <div>
+                                  <span className="text-xs font-extrabold text-emerald-950">
+                                    {recordedAudio ? 'Voice Note Murid Siap Disimpan' : 'Belum Ada Voice Note (Opsional)'}
+                                  </span>
+                                  <p className="text-[10px] text-emerald-700">
+                                    {recordedAudio 
+                                      ? 'Pesan suaramu akan otomatis terkirim dan bisa didengar langsung oleh Guru Wali.' 
+                                      : 'Kamu bisa menambahkan rekaman suaramu sekarang sebelum mengirim.'}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {recordedAudio ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handlePlayAudio('review', recordedAudio)}
+                                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-xs flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+                                    >
+                                      {playingId === 'review' ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                                      <span>{playingId === 'review' ? 'Jeda' : 'Putar Voice Note'}</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setRecordedAudio('');
+                                        playTone(220, 'sine', 0.05);
+                                      }}
+                                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                                      title="Hapus rekaman suara"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </>
+                                ) : (
+                                  !isRecording ? (
+                                    <button
+                                      type="button"
+                                      onClick={startRecording}
+                                      className="px-3.5 py-1.5 bg-rose-500 hover:bg-rose-400 text-white font-extrabold text-xs rounded-xl shadow-xs flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+                                    >
+                                      🎤 Rekam Voice Note
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={stopRecording}
+                                      className="px-3.5 py-1.5 bg-slate-800 text-white font-extrabold text-xs rounded-xl shadow-xs flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <Square className="w-3.5 h-3.5" /> Selesai
+                                    </button>
+                                  )
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Recipient Teacher reminder */}
+                            <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between text-xs text-slate-600">
+                              <span>Cerita ini akan diterima oleh Guru Wali: <strong className="text-slate-800">{selectedStudent.guruWali || 'I Wayan Sumayasa, S.Pd'}</strong></span>
+                              <span className="text-[11px] font-bold text-sky-600">Kelas {selectedStudent.class}</span>
+                            </div>
+
+                            {/* Actions on Step 5 */}
+                            <div className="flex items-center justify-between border-t border-slate-100 pt-5 mt-3 w-full">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setStep(4);
+                                  playStepSound(4);
+                                }}
+                                className="px-4 py-2.5 text-xs font-bold rounded-xl flex items-center gap-1.5 text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all cursor-pointer"
+                              >
+                                <ArrowLeft className="w-4 h-4" /> Kembali Edit Langkah 4
+                              </button>
+
                               <button
                                 type="button"
                                 onClick={handleStorySubmit}
                                 disabled={isSubmitting}
-                                className="px-6 py-2.5 bg-gradient-to-r from-sky-500 to-yellow-400 text-slate-900 font-extrabold text-xs rounded-xl shadow-md hover:opacity-95 active:scale-95 transition-all flex items-center gap-1.5"
+                                className="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-extrabold text-xs rounded-xl shadow-md active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
                               >
                                 {isSubmitting ? (
                                   <>
-                                    <span className="w-3.5 h-3.5 border-2 border-slate-900 border-t-transparent rounded-full animate-spin"></span>
-                                    Mengirim Cerita...
+                                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                    <span>{editingStoryId ? 'Menyimpan Perubahan...' : 'Mengirim Cerita...'}</span>
                                   </>
                                 ) : (
                                   <>
-                                    <Send className="w-4 h-4" /> Kirim Cerita Indahku
+                                    <Send className="w-4 h-4" />
+                                    <span>{editingStoryId ? '💾 Simpan Perubahan Cerita' : '🚀 Cerita Sudah Benar, Kirim Sekarang!'}</span>
                                   </>
                                 )}
                               </button>
-                            )}
+                            </div>
                           </div>
                         )}
 
-                        {/* STEP 5: SUCCESS PAGE */}
-                        {step === 5 && (
+                        {/* STEP 6: SUCCESS PAGE */}
+                        {step === 6 && (
                           <div className="flex flex-col items-center justify-center text-center py-12 animate-fade-in">
                             <div className="w-24 h-24 bg-sky-100 rounded-full flex items-center justify-center text-5xl mb-4 animate-bounce">
                               🎉
                             </div>
-                            <h3 className="text-xl font-extrabold text-sky-600 mb-2">Hebat Sekali, {selectedStudent.name}!</h3>
+                            <h3 className="text-xl font-extrabold text-sky-600 mb-2">
+                              {editingStoryId ? 'Perubahan Cerita Berhasil Disimpan!' : `Hebat Sekali, ${selectedStudent.name}!`}
+                            </h3>
                             <p className="text-sm text-slate-600 max-w-md leading-relaxed mb-6">
-                              Cerita indahmu sudah terkirim ke <strong>Ibu/Bapak Guru Wali</strong>. Kamu berani mengekspresikan hatimu, itu tanda anak pintar!
+                              {editingStoryId
+                                ? 'Ceritamu telah berhasil diperbarui dan tersimpan kembali di buku diary serta Guru Wali.'
+                                : <>Cerita indahmu sudah terkirim ke <strong>{selectedStudent.guruWali || 'Ibu/Bapak Guru Wali'}</strong>. Kamu berani mengekspresikan hatimu, itu tanda anak pintar!</>}
                             </p>
                             <div className="flex flex-col sm:flex-row gap-3">
                               <button
@@ -2519,8 +2921,8 @@ export default function App() {
                                   )}
                                 </div>
 
-                                {/* Teacher Response Badge */}
-                                <div className="p-3 border-t border-slate-100 bg-slate-50/50">
+                                {/* Teacher Response Badge & Edit Action */}
+                                <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex flex-col gap-2">
                                   {story.teacherResponse ? (
                                     <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
                                       <p className="text-[10px] font-extrabold text-amber-800 flex items-center gap-1">
@@ -2542,6 +2944,16 @@ export default function App() {
                                       )}
                                     </div>
                                   )}
+
+                                  <div className="flex items-center justify-end pt-1 border-t border-slate-200/60">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleStartEditStory(story)}
+                                      className="px-3 py-1.5 bg-white hover:bg-sky-50 text-sky-700 font-extrabold text-[11px] rounded-xl border border-sky-200 shadow-2xs hover:shadow-xs transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" /> Edit Cerita Ini
+                                    </button>
+                                  </div>
                                 </div>
 
                               </div>
