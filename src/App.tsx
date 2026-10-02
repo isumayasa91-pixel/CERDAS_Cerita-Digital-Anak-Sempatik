@@ -37,6 +37,8 @@ import {
   Printer,
   Edit,
   Copy,
+  Eye,
+  EyeOff,
   X
 } from 'lucide-react';
 import {
@@ -302,6 +304,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [authName, setAuthName] = useState('');
   const [authClass, setAuthClass] = useState('Kelas VII A');
   const [authError, setAuthError] = useState('');
@@ -313,6 +316,7 @@ export default function App() {
     return saved as 'guru_bk' | 'orang_tua' | null;
   });
   const [bkPasswordInput, setBkPasswordInput] = useState('');
+  const [showBkPassword, setShowBkPassword] = useState(false);
   const [parentChildInput, setParentChildInput] = useState('');
   const [bkAuthError, setBkAuthError] = useState('');
 
@@ -322,6 +326,7 @@ export default function App() {
   });
   const [adminEmail, setAdminEmail] = useState('isumayasa91@guru.smp.belajar.id');
   const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [adminAuthError, setAdminAuthError] = useState('');
   const [adminTab, setAdminTab] = useState<'teachers' | 'students' | 'stats'>('teachers');
 
@@ -329,6 +334,7 @@ export default function App() {
   const [showAdminPinModal, setShowAdminPinModal] = useState(false);
   const [adminEmailInput, setAdminEmailInput] = useState('isumayasa91@guru.smp.belajar.id');
   const [adminPinInput, setAdminPinInput] = useState('');
+  const [showAdminPin, setShowAdminPin] = useState(false);
   const [adminPinError, setAdminPinError] = useState('');
 
   const handleVerifyAdminPin = (e: React.FormEvent) => {
@@ -402,12 +408,16 @@ export default function App() {
     const unsubStudents = subscribeStudents((dataStudents) => {
       setStudents(dataStudents);
       setSelectedStudent(prevSelected => {
-        if (!prevSelected && dataStudents.length > 0) return dataStudents[0];
+        const savedId = localStorage.getItem('cerdas_student_id');
+        if (savedId) {
+          const found = dataStudents.find(s => s.id === savedId);
+          if (found) return found;
+        }
         if (prevSelected) {
           const fresh = dataStudents.find(s => s.id === prevSelected.id);
-          return fresh || (dataStudents.length > 0 ? dataStudents[0] : null);
+          if (fresh) return fresh;
         }
-        return null;
+        return dataStudents.length > 0 ? dataStudents[0] : null;
       });
     });
 
@@ -444,17 +454,19 @@ export default function App() {
     }
   }, [students]);
 
-  // Auto-sync guruWali for all students based on their respective class teacher
+  // Set default guruWali only if not yet set, respecting the teacher chosen by the student
   useEffect(() => {
     students.forEach(st => {
       const isPrama = st.name.toUpperCase().includes('I GEDE PRAMA PUTRA ANTARA');
-      const expectedClass = isPrama ? 'Kelas VII A' : st.class;
-      const expectedGuru = expectedClass === 'Kelas VII A' ? 'I Nyoman Gede Juwastra, S.Sn' :
-                           expectedClass.startsWith('Kelas VII') ? 'Ibu Rahma, S.Pd' :
-                           expectedClass.startsWith('Kelas VIII') ? 'Bapak I Sumayasa, M.Pd' :
-                           expectedClass.startsWith('Kelas IX') ? 'Bapak Deni Saputra, S.Pd' : 'Bapak I Sumayasa, M.Pd';
-      if (st.guruWali !== expectedGuru || (isPrama && st.class !== 'Kelas VII A')) {
-        updateStudentInFirestore(st.id, { guruWali: expectedGuru, ...(isPrama ? { class: 'Kelas VII A' } : {}) });
+      if (!st.guruWali || (isPrama && st.class !== 'Kelas VII A')) {
+        const expectedGuru = 
+          st.class === 'Kelas VII A' ? 'I Nyoman Gede Juwastra, S.Sn' :
+          st.class.startsWith('Kelas VIII') ? 'I Wayan Sumayasa, S.Pd' :
+          st.class.startsWith('Kelas IX') ? 'Ni Luh Ayu Evalentin, S.Pd' : 'I Nyoman Gede Juwastra, S.Sn';
+        updateStudentInFirestore(st.id, { 
+          ...(st.guruWali ? {} : { guruWali: expectedGuru }),
+          ...(isPrama && st.class !== 'Kelas VII A' ? { class: 'Kelas VII A' } : {}) 
+        });
       }
     });
   }, [students]);
@@ -909,7 +921,11 @@ export default function App() {
     // Check 1-time registration constraint
     const existing = students.find(s => s.name.trim().toLowerCase() === cleanName.toLowerCase());
     if (existing) {
-      alert(`⚠️ Murid dengan nama "${cleanName}" sudah terdaftar dalam sistem CERDAS!\n\nSetiap anak hanya dapat mendaftar 1 kali. Jika ingin mendaftar ulang, minta Admin untuk mereset akun murid di Menu Admin terlebih dahulu.`);
+      alert(`⚠️ Murid dengan nama "${cleanName}" sudah terdaftar dalam sistem CERDAS!\n\nAkun Anda telah langsung diaktifkan untuk bercerita.`);
+      setSelectedStudent(existing);
+      localStorage.setItem('cerdas_student_id', existing.id);
+      setStudentClassFilter(existing.class);
+      setShowAddStudentModal(false);
       return;
     }
 
@@ -921,6 +937,8 @@ export default function App() {
         guruWali: newStudentGuruWali
       });
       setSelectedStudent(newStud);
+      localStorage.setItem('cerdas_student_id', newStud.id);
+      setStudentClassFilter(newStudentClass);
       setNewStudentName('');
       setShowAddStudentModal(false);
       playTone(523.25, 'sine', 0.15);
@@ -1283,10 +1301,26 @@ export default function App() {
   };
 
   // Filtered lists for the active teacher (Guru Wali)
-  const teacherStudents = students.filter(st => activeGuruWaliFilter === 'Semua' || st.guruWali === activeGuruWaliFilter);
+  const teacherStudents = students.filter(st => {
+    if (activeGuruWaliFilter === 'Semua') return true;
+    if (st.guruWali === activeGuruWaliFilter) return true;
+    if (activeGuruWaliFilter.includes('Sumayasa') && (st.guruWali?.includes('Sumayasa') || st.class.startsWith('Kelas VIII'))) return true;
+    if (currentTeacher && activeGuruWaliFilter === currentTeacher.name) {
+      if (currentTeacher.class && currentTeacher.class.includes(st.class)) return true;
+    }
+    return false;
+  });
+
   const teacherStories = stories.filter(story => {
     const student = students.find(st => st.id === story.studentId);
-    return activeGuruWaliFilter === 'Semua' || (student && student.guruWali === activeGuruWaliFilter);
+    if (!student) return false;
+    if (activeGuruWaliFilter === 'Semua') return true;
+    if (student.guruWali === activeGuruWaliFilter) return true;
+    if (activeGuruWaliFilter.includes('Sumayasa') && (student.guruWali?.includes('Sumayasa') || student.class.startsWith('Kelas VIII'))) return true;
+    if (currentTeacher && activeGuruWaliFilter === currentTeacher.name) {
+      if (currentTeacher.class && currentTeacher.class.includes(student.class)) return true;
+    }
+    return false;
   });
 
   // Student specific history
@@ -1588,9 +1622,23 @@ export default function App() {
                     <span>👤</span> Pilih Akun Anak
                   </h3>
                   <span className="text-[10px] font-extrabold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">
-                    {students.length} Siswa
+                    {students.length} Siswa Terdaftar
                   </span>
                 </div>
+
+                {selectedStudent && (
+                  <div className="bg-sky-50 border border-sky-200 rounded-xl p-2.5 flex items-center justify-between gap-2 shadow-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-2xl bg-white p-1 rounded-lg border border-sky-100 shrink-0">{selectedStudent.avatar}</span>
+                      <div className="truncate">
+                        <span className="text-[9px] font-black uppercase text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded">Akun Aktif Anda</span>
+                        <p className="font-extrabold text-xs text-slate-800 truncate mt-0.5">{selectedStudent.name}</p>
+                        <p className="text-[10px] font-bold text-sky-700 truncate">{selectedStudent.class}</p>
+                        <p className="text-[10px] text-slate-600 truncate">👩‍🏫 Guru Wali: <span className="font-semibold text-slate-800">{selectedStudent.guruWali || 'Belum dipilih'}</span></p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Filter and Search Controls for 465 students */}
                 <div className="flex flex-col gap-2">
@@ -1648,30 +1696,32 @@ export default function App() {
                           type="button"
                           onClick={() => {
                             setSelectedStudent(st);
+                            localStorage.setItem('cerdas_student_id', st.id);
                             setActiveTab('profile');
                             setStep(1);
                             playTone(329.63, 'sine', 0.1);
                           }}
-                          className="flex items-center gap-2.5 flex-1 text-left focus:outline-none overflow-hidden"
+                          className="flex items-center gap-2.5 flex-1 text-left focus:outline-none overflow-hidden p-1 cursor-pointer"
                         >
                           <span className="text-xl bg-white/20 p-1.5 rounded-lg shrink-0">{st.avatar}</span>
-                          <div className="truncate">
-                            <p className="font-bold text-xs leading-tight truncate">{st.name}</p>
-                            <p className={`text-[9px] ${selectedStudent?.id === st.id ? 'text-white/85' : 'text-slate-500'} truncate`}>
-                              {st.class} · {st.guruWali ? st.guruWali.split(',')[0] : 'Umum'}
-                            </p>
+                          <div className="truncate flex-1">
+                            <div className="flex items-center justify-between">
+                              <p className="font-bold text-xs leading-tight truncate">{st.name}</p>
+                              {selectedStudent?.id === st.id && (
+                                <span className="text-[8px] bg-white/30 text-white font-extrabold px-1.5 py-0.5 rounded ml-1 shrink-0">
+                                  Aktif
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-0.5 mt-0.5">
+                              <p className={`text-[10px] font-bold ${selectedStudent?.id === st.id ? 'text-sky-100' : 'text-sky-700'} truncate`}>
+                                🏷️ {st.class}
+                              </p>
+                              <p className={`text-[9.5px] leading-tight ${selectedStudent?.id === st.id ? 'text-white/95' : 'text-slate-600'} truncate`}>
+                                👩‍🏫 Guru: <span className="font-bold underline decoration-sky-300/40">{st.guruWali || 'Belum dipilih'}</span>
+                              </p>
+                            </div>
                           </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteStudent(st.id, st.name);
-                          }}
-                          className={`p-1.5 rounded-lg transition-colors focus:outline-none shrink-0 ${selectedStudent?.id === st.id ? 'text-sky-100 hover:text-white hover:bg-white/15' : 'text-slate-400 hover:text-sky-600 hover:bg-sky-50'}`}
-                          title="Hapus Siswa"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     ))}
@@ -2563,15 +2613,35 @@ export default function App() {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-slate-600">Kata Sandi:</label>
-                <input
-                  type="password"
-                  required
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white text-xs font-medium focus:outline-none focus:border-sky-500"
-                />
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-600">Kata Sandi:</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthPassword(!showAuthPassword)}
+                    className="text-[11px] font-bold text-sky-600 hover:text-sky-700 flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    {showAuthPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{showAuthPassword ? 'Sembunyikan' : 'Lihat Sandi'}</span>
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showAuthPassword ? 'text' : 'password'}
+                    required
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full pl-3.5 pr-10 py-2.5 border-2 border-slate-200 rounded-xl bg-white text-xs font-medium focus:outline-none focus:border-sky-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthPassword(!showAuthPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                    title={showAuthPassword ? 'Sembunyikan kata sandi' : 'Lihat kata sandi'}
+                  >
+                    {showAuthPassword ? <EyeOff className="w-4 h-4 text-sky-600" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
               {authMode === 'register' && (
@@ -2673,12 +2743,15 @@ export default function App() {
                     }}
                     className="px-3.5 py-2 border-2 border-slate-200 rounded-xl bg-white text-xs font-bold text-slate-700 focus:outline-none focus:border-sky-500"
                   >
-                    <option value="Semua">Semua Guru Wali (Administrator)</option>
+                    <option value="Semua">Semua Guru Wali & Kelas (Seluruh Sekolah)</option>
                     <option value={currentTeacher.name}>{currentTeacher.name} (Asuhan Anda)</option>
-                    <option value="Ibu Rahma, S.Pd">Ibu Rahma, S.Pd (Kelas VII)</option>
-                    <option value="Bapak I Sumayasa, M.Pd">Bapak I Sumayasa, M.Pd (Kelas VIII)</option>
-                    <option value="Bapak Deni Saputra, S.Pd">Bapak Deni Saputra, S.Pd (Kelas IX)</option>
-                    <option value="Ibu Sri Wahyuni, S.Pd">Ibu Sri Wahyuni, S.Pd (Umum)</option>
+                    {teachers
+                      .filter(t => t.name !== currentTeacher.name && !t.class?.includes('BK'))
+                      .map(t => (
+                        <option key={t.id} value={t.name}>
+                          {t.name} ({t.class})
+                        </option>
+                      ))}
                   </select>
                 </div>
                 <button
@@ -2755,7 +2828,8 @@ export default function App() {
                           <span className="text-2xl">{st.avatar}</span>
                           <div>
                             <p className="font-extrabold text-sm text-slate-800">{st.name}</p>
-                            <p className="text-[10px] text-slate-500">{st.class}</p>
+                            <p className="text-[10px] font-bold text-indigo-700">{st.class}</p>
+                            <p className="text-[9.5px] text-slate-500">Guru: <span className="font-semibold text-slate-700">{st.guruWali || 'Belum dipilih'}</span></p>
                           </div>
                         </div>
 
@@ -3086,14 +3160,24 @@ export default function App() {
                   </span>
                 </div>
                 <form onSubmit={handleBkLogin} className="flex flex-col gap-2">
-                  <input
-                    type="password"
-                    required
-                    value={bkPasswordInput}
-                    onChange={(e) => setBkPasswordInput(e.target.value)}
-                    placeholder="Sandi BK (bk123 / 12345)"
-                    className="px-3.5 py-2.5 border-2 border-emerald-100 rounded-xl bg-white text-xs font-medium focus:outline-none focus:border-emerald-500"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showBkPassword ? 'text' : 'password'}
+                      required
+                      value={bkPasswordInput}
+                      onChange={(e) => setBkPasswordInput(e.target.value)}
+                      placeholder="Sandi BK (bk123 / 12345)"
+                      className="w-full pl-3.5 pr-10 py-2.5 border-2 border-emerald-100 rounded-xl bg-white text-xs font-medium focus:outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowBkPassword(!showBkPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-emerald-700 transition-colors cursor-pointer"
+                      title={showBkPassword ? 'Sembunyikan kata sandi' : 'Lihat kata sandi'}
+                    >
+                      {showBkPassword ? <EyeOff className="w-4 h-4 text-emerald-600" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                   <button
                     type="submit"
                     className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm transition-colors"
@@ -3469,15 +3553,35 @@ export default function App() {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-slate-600">Kata Sandi Administrator:</label>
-                <input
-                  type="password"
-                  required
-                  value={adminPassword}
-                  onChange={(e) => setAdminPassword(e.target.value)}
-                  placeholder="Masukkan password admin (default: admin123)"
-                  className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white text-xs font-medium focus:outline-none focus:border-rose-500"
-                />
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-600">Kata Sandi Administrator:</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPassword(!showAdminPassword)}
+                    className="text-[11px] font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    {showAdminPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{showAdminPassword ? 'Sembunyikan' : 'Lihat Sandi'}</span>
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showAdminPassword ? 'text' : 'password'}
+                    required
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    placeholder="Masukkan password admin (default: admin123)"
+                    className="w-full pl-3.5 pr-10 py-2.5 border-2 border-slate-200 rounded-xl bg-white text-xs font-medium focus:outline-none focus:border-rose-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPassword(!showAdminPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                    title={showAdminPassword ? 'Sembunyikan kata sandi' : 'Lihat kata sandi'}
+                  >
+                    {showAdminPassword ? <EyeOff className="w-4 h-4 text-rose-600" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-1">
@@ -4121,8 +4225,23 @@ export default function App() {
                   <label className="font-bold text-slate-600">Kelas:</label>
                   <select
                     value={newStudentClass}
-                    onChange={(e) => setNewStudentClass(e.target.value)}
-                    className="px-3 py-2.5 border-2 border-slate-200 rounded-xl bg-white focus:outline-none"
+                    onChange={(e) => {
+                      const cls = e.target.value;
+                      setNewStudentClass(cls);
+                      // Check if any registered teacher explicitly has this class in t.class
+                      const matched = teachers.find(t => !t.class?.includes('BK') && t.class && t.class.includes(cls));
+                      if (matched) {
+                        setNewStudentGuruWali(matched.name);
+                      } else {
+                        const fallbackGuru = 
+                          cls === 'Kelas VII A' ? 'I Nyoman Gede Juwastra, S.Sn' :
+                          cls.startsWith('Kelas VIII') ? 'I Wayan Sumayasa, S.Pd' :
+                          cls.startsWith('Kelas IX') ? 'Ni Luh Ayu Evalentin, S.Pd' :
+                          cls.startsWith('Kelas VII') ? 'I Nyoman Gede Juwastra, S.Sn' : 'I Wayan Sumayasa, S.Pd';
+                        setNewStudentGuruWali(fallbackGuru);
+                      }
+                    }}
+                    className="px-3 py-2.5 border-2 border-slate-200 rounded-xl bg-white focus:outline-none font-bold text-slate-700"
                   >
                     <optgroup label="Kelas VII (Tujuh)">
                       <option value="Kelas VII A">Kelas VII A</option>
@@ -4166,18 +4285,36 @@ export default function App() {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="font-bold text-slate-600">Guru Wali:</label>
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-600">Pilih Guru Wali:</label>
+                  <span className="text-[10px] text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full font-bold border border-sky-100">
+                    Muncul di bawah nama murid
+                  </span>
+                </div>
                 <select
                   value={newStudentGuruWali}
                   onChange={(e) => setNewStudentGuruWali(e.target.value)}
-                  className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white focus:outline-none font-medium"
+                  className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-white focus:outline-none font-bold text-slate-700"
                 >
-                  {teachers.map((t: any) => (
-                    <option key={t.id} value={t.name}>
-                      {t.name} ({t.class})
-                    </option>
-                  ))}
+                  {teachers
+                    .filter(t => !t.class?.includes('BK'))
+                    .map((t: any) => {
+                      const teachesThisClass = t.class && t.class.includes(newStudentClass);
+                      return (
+                        <option key={t.id} value={t.name}>
+                          {t.name} {teachesThisClass ? `⭐ (Guru Wali ${newStudentClass})` : `(${t.class})`}
+                        </option>
+                      );
+                    })}
                 </select>
+                <div className="bg-sky-50/80 border border-sky-200/80 p-2.5 rounded-xl text-[11px] text-sky-800 flex items-center gap-2">
+                  <span className="text-base">👩‍🏫</span>
+                  <div>
+                    <span className="font-bold">Guru Wali Terpilih: </span>
+                    <span className="font-extrabold text-sky-900 underline">{newStudentGuruWali || 'Belum dipilih'}</span>
+                    <p className="text-[10px] text-sky-700 mt-0.5">Nama guru ini otomatis muncul di bawah nama murid pada daftar kelas {newStudentClass}.</p>
+                  </div>
+                </div>
               </div>
 
               <div className="flex gap-2.5 justify-end mt-4">
@@ -4662,15 +4799,35 @@ export default function App() {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-slate-700">Kata Sandi / PIN Administrator:</label>
-                <input
-                  type="password"
-                  required
-                  value={adminPinInput}
-                  onChange={(e) => setAdminPinInput(e.target.value)}
-                  placeholder="Masukkan password admin (default: admin123)"
-                  className="px-3.5 py-2.5 border-2 border-slate-200 rounded-xl bg-slate-50 focus:bg-white text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-rose-500"
-                />
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700">Kata Sandi / PIN Administrator:</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPin(!showAdminPin)}
+                    className="text-[11px] font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    {showAdminPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{showAdminPin ? 'Sembunyikan' : 'Lihat PIN'}</span>
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showAdminPin ? 'text' : 'password'}
+                    required
+                    value={adminPinInput}
+                    onChange={(e) => setAdminPinInput(e.target.value)}
+                    placeholder="Masukkan password admin (default: admin123)"
+                    className="w-full pl-3.5 pr-10 py-2.5 border-2 border-slate-200 rounded-xl bg-slate-50 focus:bg-white text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-rose-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPin(!showAdminPin)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                    title={showAdminPin ? 'Sembunyikan PIN' : 'Lihat PIN'}
+                  >
+                    {showAdminPin ? <EyeOff className="w-4 h-4 text-rose-600" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
