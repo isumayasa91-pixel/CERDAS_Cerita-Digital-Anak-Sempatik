@@ -339,6 +339,37 @@ export async function syncAllTeachersToFirestore(teachersList: Teacher[]): Promi
   }
 }
 
+// Explicitly save and sync all students list to Cloud Firestore
+export async function syncAllStudentsToFirestore(studentsList: Student[]): Promise<number> {
+  try {
+    // Clear any deleted IDs that are currently being saved back
+    const currentDeletedIds = getDeletedStudentIds();
+    const studentIdSet = new Set(studentsList.map(s => s.id));
+    const filteredDeletedIds = currentDeletedIds.filter(id => !studentIdSet.has(id));
+    localStorage.setItem('cerdas_deleted_student_ids', JSON.stringify(filteredDeletedIds));
+
+    // Save locally
+    for (const student of studentsList) {
+      saveCustomStudentLocally(student);
+    }
+
+    // Write in chunks of 300 to Firestore
+    const chunkSize = 300;
+    for (let i = 0; i < studentsList.length; i += chunkSize) {
+      const chunk = studentsList.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      for (const student of chunk) {
+        batch.set(doc(db, 'students', student.id), student, { merge: true });
+      }
+      await batch.commit();
+    }
+    return studentsList.length;
+  } catch (err) {
+    console.error('Failed to sync students to Cloud Firestore:', err);
+    throw err;
+  }
+}
+
 // Bulk delete demo students
 export async function bulkDeleteDemoStudents(): Promise<void> {
   return;

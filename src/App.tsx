@@ -67,6 +67,7 @@ import {
   markTeacherDeletedLocally,
   updateTeacherInFirestore,
   syncAllTeachersToFirestore,
+  syncAllStudentsToFirestore,
   updateGuruNoteInFirestore,
   escalateStoryInFirestore,
   unescalateStoryInFirestore,
@@ -367,6 +368,7 @@ export default function App() {
   const [adminAuthError, setAdminAuthError] = useState('');
   const [adminTab, setAdminTab] = useState<'teachers' | 'students' | 'upload_excel' | 'stats'>('teachers');
   const [isSavingTeachersToCloud, setIsSavingTeachersToCloud] = useState<boolean>(false);
+  const [isSavingStudentsToCloud, setIsSavingStudentsToCloud] = useState<boolean>(false);
   const [isDeletingAllStudents, setIsDeletingAllStudents] = useState<boolean>(false);
 
   // Admin Secure PIN Modal States
@@ -1396,6 +1398,25 @@ export default function App() {
       showToast('❌ Gagal menyimpan data guru ke database Cloud.', 'error');
     } finally {
       setIsSavingTeachersToCloud(false);
+    }
+  };
+
+  // Explicit Save & Sync all students to Cloud Firestore
+  const handleSaveAllStudentsToCloud = async () => {
+    if (students.length === 0) {
+      showToast('⚠️ Belum ada data siswa untuk disimpan ke Cloud.', 'error');
+      return;
+    }
+    setIsSavingStudentsToCloud(true);
+    try {
+      const count = await syncAllStudentsToFirestore(students);
+      showToast(`✅ Berhasil menyimpan dan menyinkronkan ${count} data siswa ke database Cloud Firestore!`);
+      playTone(587.33, 'sine', 0.25);
+    } catch (err) {
+      console.error('Failed saving students:', err);
+      showToast('❌ Gagal menyimpan data siswa ke database Cloud.', 'error');
+    } finally {
+      setIsSavingStudentsToCloud(false);
     }
   };
 
@@ -5203,6 +5224,23 @@ export default function App() {
                   </form>
 
                   <button
+                    type="button"
+                    disabled={isSavingStudentsToCloud || students.length === 0}
+                    onClick={handleSaveAllStudentsToCloud}
+                    className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-extrabold text-xs shadow-md transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingStudentsToCloud ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" /> Menyimpan Data Siswa ke Firestore...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4" /> Simpan Semua Data Siswa ke Cloud Firestore
+                      </>
+                    )}
+                  </button>
+
+                  <button
                     onClick={async () => {
                       if (confirm('Apakah Anda ingin memulihkan dan menyinkronkan seluruh data murid terdaftar ke Cloud Firestore?')) {
                         try {
@@ -5215,7 +5253,7 @@ export default function App() {
                         }
                       }
                     }}
-                    className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-xl font-bold text-xs border border-sky-200 transition-colors cursor-pointer"
+                    className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-xl font-bold text-xs border border-sky-200 transition-colors cursor-pointer"
                   >
                     <RefreshCw className="w-4 h-4 text-sky-600" /> Pulihkan & Sinkronkan Semua Data Murid ke Cloud
                   </button>
@@ -5247,6 +5285,23 @@ export default function App() {
                       <h4 className="font-extrabold text-sm text-slate-800">Daftar Murid Terdaftar</h4>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 self-end sm:self-center">
+                      <button
+                        type="button"
+                        disabled={isSavingStudentsToCloud || students.length === 0}
+                        onClick={handleSaveAllStudentsToCloud}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                        title="Simpan dan sinkronkan seluruh data murid ke Cloud Firestore"
+                      >
+                        {isSavingStudentsToCloud ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Menyimpan...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5" /> Simpan ke Cloud ({students.length})
+                          </>
+                        )}
+                      </button>
                       <button
                         type="button"
                         onClick={() => { setAdminTab('upload_excel'); playTone(400, 'sine', 0.05); }}
