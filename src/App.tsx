@@ -434,7 +434,7 @@ export default function App() {
   // Initialize Real-time Firestore Subscriptions and Seeding
   useEffect(() => {
     // Seed initial data if database is brand new
-    // seedInitialFirestoreData();
+    seedInitialFirestoreData();
 
     // 1. Real-time Students subscription
     const unsubStudents = subscribeStudents((dataStudents) => {
