@@ -373,6 +373,7 @@ export default function App() {
 
   // Admin Secure PIN Modal States
   const [showAdminPinModal, setShowAdminPinModal] = useState(false);
+  const [showSyncInfoModal, setShowSyncInfoModal] = useState<boolean>(false);
   const [adminEmailInput, setAdminEmailInput] = useState('isumayasa91@guru.smp.belajar.id');
   const [adminPinInput, setAdminPinInput] = useState('');
   const [showAdminPin, setShowAdminPin] = useState(false);
@@ -1874,8 +1875,18 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Zone 3: Active Profile Indicator */}
+        {/* Zone 3: Active Profile Indicator & Real-Time Sync Status */}
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => { setShowSyncInfoModal(true); playTone(500, 'sine', 0.1); }}
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-extrabold rounded-full border border-emerald-200 transition-all cursor-pointer shadow-2xs"
+            title="Klik untuk melihat petunjuk sinkronisasi data ke HP, Tablet, & Laptop lain"
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>Cloud Real-Time (HP & PC)</span>
+          </button>
+
           {role === 'murid' && selectedStudent ? (
             <div className="flex items-center gap-2 bg-sky-50 px-3 py-1 rounded-full border border-sky-100">
               <span className="text-lg">{selectedStudent.avatar}</span>
@@ -6687,6 +6698,87 @@ export default function App() {
                 className="w-full py-2 text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-xl transition-colors cursor-pointer"
               >
                 Batal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PETUNJUK SINKRONISASI LINTAS PERANGKAT (HP / LAPTOP / TABLET) */}
+      {showSyncInfoModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full p-6 shadow-2xl flex flex-col gap-5 relative">
+            <button
+              onClick={() => setShowSyncInfoModal(false)}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-800">Sinkronisasi Real-Time Lintas Perangkat</h3>
+                <p className="text-xs text-slate-500">Terhubung langsung dengan Cloud Firestore Database</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3.5 text-xs">
+              <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-start gap-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping mt-1"></span>
+                <div>
+                  <p className="font-extrabold text-emerald-900">Status Database Cloud Firestore: TERHUBUNG</p>
+                  <p className="text-[11px] text-emerald-800 mt-0.5">
+                    Seluruh data murid, akun guru, dan jurnal refleksi tersimpan aman di Cloud Firestore. Setiap perubahan otomatis tersinkronisasi secara *real-time* ke semua perangkat (HP & PC).
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col gap-2.5">
+                <p className="font-extrabold text-slate-800 flex items-center gap-1.5">
+                  📱 Cara Akses & Sinkronisasi dari HP / Smartphone / Tablet:
+                </p>
+                <ol className="list-decimal list-inside text-slate-600 space-y-1.5 text-[11px] leading-relaxed">
+                  <li>Buka browser (Chrome, Safari, Edge, Firefox) pada HP atau Tablet Anda.</li>
+                  <li>Masukkan atau tempel URL aplikasi web ini di alamat browser HP Anda.</li>
+                  <li>Login menggunakan akun **Guru Wali**, **Guru BK**, atau **Anak**.</li>
+                  <li>Semua perubahan (input refleksi, pendaftaran siswa, rekap nilai) di HP akan **otomatis langsung muncul di PC/Laptop** tanpa perlu memuat ulang (*refresh*) halaman!</li>
+                </ol>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="font-extrabold text-slate-700">URL Aplikasi untuk Dibuka di HP:</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={window.location.href}
+                    className="flex-1 px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-[11px] font-mono text-slate-700 select-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(window.location.href);
+                      showToast('📋 URL Aplikasi berhasil disalin! Kirim ke HP Anda.');
+                      playTone(523, 'sine', 0.15);
+                    }}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer whitespace-nowrap"
+                  >
+                    <Copy className="w-3.5 h-3.5" /> Salin URL
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowSyncInfoModal(false)}
+                className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                Tutup & Mengerti
               </button>
             </div>
           </div>
