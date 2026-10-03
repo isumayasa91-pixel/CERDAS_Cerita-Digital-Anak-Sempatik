@@ -41,11 +41,14 @@ import {
   Eye,
   EyeOff,
   Search,
+  FileSpreadsheet,
   X
 } from 'lucide-react';
+import { ExcelUploadSection } from './components/ExcelUploadSection';
 import {
   seedInitialFirestoreData,
-  seedFullRoster465StudentsToFirestore,
+  restoreAllStudentsData,
+  restoreAllTeachersRoster,
   subscribeStudents,
   subscribeTeachers,
   subscribeStories,
@@ -62,6 +65,7 @@ import {
   bulkDeleteDemoStudents,
   markTeacherDeletedLocally,
   updateTeacherInFirestore,
+  syncAllTeachersToFirestore,
   updateGuruNoteInFirestore,
   escalateStoryInFirestore,
   unescalateStoryInFirestore,
@@ -360,7 +364,8 @@ export default function App() {
   const [adminPassword, setAdminPassword] = useState('');
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [adminAuthError, setAdminAuthError] = useState('');
-  const [adminTab, setAdminTab] = useState<'teachers' | 'students' | 'stats'>('teachers');
+  const [adminTab, setAdminTab] = useState<'teachers' | 'students' | 'upload_excel' | 'stats'>('teachers');
+  const [isSavingTeachersToCloud, setIsSavingTeachersToCloud] = useState<boolean>(false);
 
   // Admin Secure PIN Modal States
   const [showAdminPinModal, setShowAdminPinModal] = useState(false);
@@ -1377,6 +1382,21 @@ export default function App() {
     }
   };
 
+  // Explicit Save & Sync all teachers to Cloud Firestore
+  const handleSaveAllTeachersToCloud = async () => {
+    setIsSavingTeachersToCloud(true);
+    try {
+      const count = await syncAllTeachersToFirestore(teachers);
+      showToast(`✅ Berhasil menyimpan dan menyinkronkan ${count} data akun guru ke Cloud Firestore!`);
+      playTone(587.33, 'sine', 0.25);
+    } catch (err) {
+      console.error('Failed saving teachers:', err);
+      showToast('❌ Gagal menyimpan data guru ke database Cloud.', 'error');
+    } finally {
+      setIsSavingTeachersToCloud(false);
+    }
+  };
+
   // Admin registers new student (With 1-time registration check)
   const handleAdminAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2099,34 +2119,19 @@ export default function App() {
                     ))}
                 </div>
 
+                {students.length === 0 && (
+                  <div className="p-3 bg-sky-50 border border-sky-200 rounded-xl text-center text-sky-900 text-xs">
+                    <p className="font-bold">👋 Belum ada murid terdaftar.</p>
+                    <p className="text-[11px] text-sky-700 mt-0.5">Silakan klik tombol di bawah untuk mengetikkan nama dan kelasmu!</p>
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-1.5 pt-1">
                   <button
                     onClick={() => setShowAddStudentModal(true)}
-                    className="flex items-center justify-center gap-1.5 w-full py-2 border-2 border-dashed border-sky-300 rounded-xl text-sky-600 font-bold text-xs hover:bg-sky-50 transition-colors"
+                    className="flex items-center justify-center gap-1.5 w-full py-2.5 bg-sky-500 hover:bg-sky-400 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer"
                   >
-                    <Plus className="w-4 h-4" /> Tambah Murid Baru
-                  </button>
-
-                  <button
-                    onClick={async () => {
-                      if (confirm("Apakah Anda ingin membuat rombel 465 siswa lengkap (Kelas VII A-E, VIII A-E, IX A-E) secara otomatis di Cloud Firestore?")) {
-                        try {
-                          setIsGenerating465(true);
-                          const total = await seedFullRoster465StudentsToFirestore();
-                          alert(`Hebat! Berhasil membuat ${total} data siswa otomatis tersinkron ke Firestore!`);
-                          playTone(523, 'sine', 0.2);
-                        } catch (err) {
-                          console.error(err);
-                          alert("Gagal membuat data rombel siswa.");
-                        } finally {
-                          setIsGenerating465(false);
-                        }
-                      }
-                    }}
-                    disabled={isGenerating465}
-                    className="flex items-center justify-center gap-1.5 w-full py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-[11px] rounded-xl shadow-sm transition-all"
-                  >
-                    ⚡ {isGenerating465 ? 'Mengisi Database 465 Siswa...' : 'Isi Rombel 465 Siswa (15 Kelas)'}
+                    <Plus className="w-4 h-4" /> Ketik & Daftarkan Nama Murid
                   </button>
                 </div>
               </div>
@@ -4723,7 +4728,13 @@ export default function App() {
                 <Users className="w-4 h-4" /> Kelola & Daftarkan Murid ({students.length})
               </button>
               <button
-                onClick={() => { setAdminTab('stats'); playTone(400, 'sine', 0.05); }}
+                onClick={() => { setAdminTab('upload_excel'); playTone(400, 'sine', 0.05); }}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all whitespace-nowrap ${adminTab === 'upload_excel' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-500" /> Upload & Import Excel
+              </button>
+              <button
+                onClick={() => { setAdminTab('stats'); playTone(450, 'sine', 0.05); }}
                 className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all whitespace-nowrap ${adminTab === 'stats' ? 'bg-rose-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}
               >
                 <TrendingUp className="w-4 h-4" /> Rekap & Monitoring Data
@@ -4912,6 +4923,41 @@ export default function App() {
                       <Plus className="w-4 h-4" /> Daftarkan Akun Guru ke Cloud
                     </button>
                   </form>
+
+                  <button
+                    type="button"
+                    disabled={isSavingTeachersToCloud}
+                    onClick={handleSaveAllTeachersToCloud}
+                    className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-extrabold text-xs shadow-md transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingTeachersToCloud ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" /> Menyimpan Data Guru ke Firestore...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4" /> Simpan Semua Data Guru ke Cloud Firestore
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      if (confirm('Apakah Anda ingin memulihkan dan menyinkronkan seluruh akun Guru Wali & Guru BK bawaan ke Cloud Firestore?')) {
+                        try {
+                          const count = await restoreAllTeachersRoster();
+                          showToast(`✅ Berhasil memulihkan & menyinkronkan ${count} data Guru ke Cloud!`);
+                          playTone(523, 'sine', 0.2);
+                        } catch (e) {
+                          console.error(e);
+                          showToast('❌ Gagal menyinkronkan data guru.');
+                        }
+                      }
+                    }}
+                    className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl font-bold text-xs border border-rose-200 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className="w-4 h-4 text-rose-600" /> Pulihkan & Sinkronkan Semua Akun Guru ke Cloud
+                  </button>
                 </div>
 
                 {/* List of Teachers */}
@@ -4921,14 +4967,39 @@ export default function App() {
                       <span className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">👩‍🏫</span>
                       <h4 className="font-extrabold text-sm text-slate-800">Daftar Akun Guru Terdaftar</h4>
                     </div>
-                    <div className="flex items-center gap-2 self-end sm:self-center">
+                    <div className="flex flex-wrap items-center gap-2 self-end sm:self-center">
+                      <button
+                        type="button"
+                        disabled={isSavingTeachersToCloud}
+                        onClick={handleSaveAllTeachersToCloud}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                        title="Simpan dan sinkronkan seluruh data akun guru ke Cloud Firestore"
+                      >
+                        {isSavingTeachersToCloud ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Menyimpan...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5" /> Simpan ke Cloud
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setAdminTab('upload_excel'); playTone(400, 'sine', 0.05); }}
+                        className="px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-extrabold text-xs rounded-xl flex items-center gap-1.5 border border-emerald-200 shadow-2xs transition-colors cursor-pointer"
+                        title="Upload ratusan akun guru via file Excel"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> Upload Excel
+                      </button>
                       <button
                         type="button"
                         onClick={() => handlePrintTeacherCredentials(teachers, 'Daftar Kartu Akses Login Semua Guru Wali & BK')}
                         className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all"
                         title="Cetak Kartu Akses Login untuk seluruh Guru Wali & BK"
                       >
-                        <Printer className="w-3.5 h-3.5" /> Cetak Akses Semua Guru
+                        <Printer className="w-3.5 h-3.5" /> Cetak Akses
                       </button>
                       <span className="text-xs font-bold bg-slate-100 px-3 py-1 rounded-full text-slate-600">
                         Total: {teachers.length} Guru
@@ -5109,14 +5180,20 @@ export default function App() {
                   </form>
                   <button
                     onClick={async () => {
-                      if (confirm('Apakah Anda yakin ingin menghapus semua data murid demo secara permanen?')) {
-                        await bulkDeleteDemoStudents();
-                        alert('Data murid demo telah dihapus.');
+                      if (confirm('Apakah Anda ingin memulihkan dan menyinkronkan seluruh data murid terdaftar ke Cloud Firestore?')) {
+                        try {
+                          const count = await restoreAllStudentsData();
+                          showToast(`✅ Berhasil memulihkan & menyinkronkan ${count} data murid ke Cloud!`);
+                          playTone(523, 'sine', 0.2);
+                        } catch (e) {
+                          console.error(e);
+                          showToast('❌ Gagal memulihkan data murid.');
+                        }
                       }
                     }}
-                    className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl font-bold text-xs border border-rose-200 transition-colors"
+                    className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-xl font-bold text-xs border border-sky-200 transition-colors cursor-pointer"
                   >
-                    <Trash2 className="w-4 h-4" /> Hapus Semua Murid Demo
+                    <RefreshCw className="w-4 h-4 text-sky-600" /> Pulihkan & Sinkronkan Semua Data Murid ke Cloud
                   </button>
                 </div>
 
@@ -5127,9 +5204,19 @@ export default function App() {
                       <span className="p-2 bg-sky-50 text-sky-600 rounded-xl">🎒</span>
                       <h4 className="font-extrabold text-sm text-slate-800">Daftar Murid Terdaftar</h4>
                     </div>
-                    <span className="text-xs font-bold bg-slate-100 px-3 py-1 rounded-full text-slate-600">
-                      Total: {students.length} Murid
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setAdminTab('upload_excel'); playTone(400, 'sine', 0.05); }}
+                        className="px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-extrabold text-xs rounded-xl flex items-center gap-1.5 border border-emerald-200 shadow-2xs transition-colors cursor-pointer"
+                        title="Upload ratusan data siswa via file Excel"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> Upload Excel Siswa
+                      </button>
+                      <span className="text-xs font-bold bg-slate-100 px-3 py-1 rounded-full text-slate-600">
+                        Total: {students.length} Murid
+                      </span>
+                    </div>
                   </div>
 
                   {students.length === 0 ? (
@@ -5256,6 +5343,18 @@ export default function App() {
                   </p>
                 </div>
               </div>
+            )}
+
+            {/* TAB 4: UPLOAD & IMPORT DATA EXCEL */}
+            {adminTab === 'upload_excel' && (
+              <ExcelUploadSection
+                teachers={teachers}
+                onSuccess={(msg) => {
+                  showToast(msg);
+                  playTone(587.33, 'sine', 0.25);
+                }}
+                playTone={playTone}
+              />
             )}
 
           </div>
