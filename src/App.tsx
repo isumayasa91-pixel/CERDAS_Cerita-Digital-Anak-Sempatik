@@ -55,6 +55,7 @@ import {
   saveStoryToFirestore,
   addStudentToFirestore,
   deleteStudentFromFirestore,
+  deleteAllStudentsFromFirestore,
   markStudentDeletedLocally,
   deleteStoryFromFirestore,
   updateStudentInFirestore,
@@ -366,6 +367,7 @@ export default function App() {
   const [adminAuthError, setAdminAuthError] = useState('');
   const [adminTab, setAdminTab] = useState<'teachers' | 'students' | 'upload_excel' | 'stats'>('teachers');
   const [isSavingTeachersToCloud, setIsSavingTeachersToCloud] = useState<boolean>(false);
+  const [isDeletingAllStudents, setIsDeletingAllStudents] = useState<boolean>(false);
 
   // Admin Secure PIN Modal States
   const [showAdminPinModal, setShowAdminPinModal] = useState(false);
@@ -1394,6 +1396,27 @@ export default function App() {
       showToast('❌ Gagal menyimpan data guru ke database Cloud.', 'error');
     } finally {
       setIsSavingTeachersToCloud(false);
+    }
+  };
+
+  // Admin deletes all students from Cloud Firestore & local storage
+  const handleDeleteAllStudents = async () => {
+    const confirmDelete = window.confirm(
+      `⚠️ PERINGATAN PENTING!\n\nApakah Anda yakin ingin MENGHAPUS SEMUA DATA (${students.length}) MURID dari database Cloud Firestore dan sistem?\n\nTindakan ini akan mengosongkan seluruh daftar siswa.`
+    );
+    if (!confirmDelete) return;
+
+    setIsDeletingAllStudents(true);
+    try {
+      setStudents([]);
+      const count = await deleteAllStudentsFromFirestore();
+      showToast(`🗑️ Berhasil menghapus seluruh data murid (${count} data) dari database Cloud Firestore!`);
+      playTone(220, 'sine', 0.25);
+    } catch (err) {
+      console.error(err);
+      showToast('❌ Gagal menghapus seluruh data murid.', 'error');
+    } finally {
+      setIsDeletingAllStudents(false);
     }
   };
 
@@ -5178,6 +5201,7 @@ export default function App() {
                       <Plus className="w-4 h-4" /> Daftarkan Murid ke Cloud
                     </button>
                   </form>
+
                   <button
                     onClick={async () => {
                       if (confirm('Apakah Anda ingin memulihkan dan menyinkronkan seluruh data murid terdaftar ke Cloud Firestore?')) {
@@ -5195,16 +5219,34 @@ export default function App() {
                   >
                     <RefreshCw className="w-4 h-4 text-sky-600" /> Pulihkan & Sinkronkan Semua Data Murid ke Cloud
                   </button>
+
+                  <button
+                    type="button"
+                    disabled={isDeletingAllStudents || students.length === 0}
+                    onClick={handleDeleteAllStudents}
+                    className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl font-bold text-xs border border-rose-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Kosongkan seluruh data murid dari Cloud Firestore"
+                  >
+                    {isDeletingAllStudents ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin text-rose-600" /> Sedang Menghapus Data Murid...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4 text-rose-600" /> Hapus Semua Data Siswa
+                      </>
+                    )}
+                  </button>
                 </div>
 
                 {/* List of Students */}
                 <div className="lg:col-span-7 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col gap-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
                     <div className="flex items-center gap-2">
                       <span className="p-2 bg-sky-50 text-sky-600 rounded-xl">🎒</span>
                       <h4 className="font-extrabold text-sm text-slate-800">Daftar Murid Terdaftar</h4>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 self-end sm:self-center">
                       <button
                         type="button"
                         onClick={() => { setAdminTab('upload_excel'); playTone(400, 'sine', 0.05); }}
@@ -5212,6 +5254,15 @@ export default function App() {
                         title="Upload ratusan data siswa via file Excel"
                       >
                         <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> Upload Excel Siswa
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isDeletingAllStudents || students.length === 0}
+                        onClick={handleDeleteAllStudents}
+                        className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold text-xs rounded-xl flex items-center gap-1.5 border border-rose-200 shadow-2xs transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Hapus semua data murid dari database"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Hapus Semua ({students.length})
                       </button>
                       <span className="text-xs font-bold bg-slate-100 px-3 py-1 rounded-full text-slate-600">
                         Total: {students.length} Murid

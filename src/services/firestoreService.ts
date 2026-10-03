@@ -685,6 +685,51 @@ export async function deleteStudentFromFirestore(studentId: string, associatedSt
   }
 }
 
+// Delete ALL Students from Cloud Firestore and local storage
+export async function deleteAllStudentsFromFirestore(): Promise<number> {
+  try {
+    // 1. Fetch all students from Firestore
+    const snap = await getDocs(collection(db, 'students'));
+    const allIds = new Set<string>();
+
+    // Mark default students as deleted locally too
+    for (const s of DEFAULT_STUDENTS) {
+      allIds.add(s.id);
+    }
+
+    // Add local custom students IDs
+    for (const s of getCustomStudents()) {
+      allIds.add(s.id);
+    }
+
+    // Add Firestore docs
+    for (const d of snap.docs) {
+      allIds.add(d.id);
+    }
+
+    // Mark all as deleted locally so onSnapshot/defaults don't resurrect them
+    localStorage.setItem('cerdas_deleted_student_ids', JSON.stringify(Array.from(allIds)));
+    localStorage.removeItem('cerdas_custom_students');
+
+    // 2. Batch delete all from Firestore in chunks
+    const docsToDelete = snap.docs;
+    const chunkSize = 400;
+    for (let i = 0; i < docsToDelete.length; i += chunkSize) {
+      const chunk = docsToDelete.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      for (const d of chunk) {
+        batch.delete(d.ref);
+      }
+      await batch.commit();
+    }
+
+    return allIds.size;
+  } catch (err) {
+    console.error('Error deleting all students:', err);
+    throw err;
+  }
+}
+
 // Register Teacher
 export async function registerTeacherToFirestore(data: { name: string; email: string; password?: string; class: string }): Promise<Teacher> {
   const id = `t-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
