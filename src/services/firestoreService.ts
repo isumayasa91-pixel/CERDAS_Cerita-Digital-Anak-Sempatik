@@ -9,7 +9,8 @@ import {
   query,
   orderBy,
   getDoc,
-  writeBatch
+  writeBatch,
+  arrayUnion
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 
@@ -269,6 +270,38 @@ export async function restoreAllStudentsData(): Promise<number> {
   }
 }
 
+// Cloud Deleted Item Trackers for Real-Time Cross-Device Sync
+let cloudDeletedStudentIds = new Set<string>();
+let cloudDeletedTeacherIds = new Set<string>();
+
+// Listen to cloud deleted students
+try {
+  onSnapshot(doc(db, 'system_meta', 'deleted_students'), (snap) => {
+    if (snap.exists()) {
+      const data = snap.data();
+      if (Array.isArray(data?.ids)) {
+        cloudDeletedStudentIds = new Set(data.ids);
+      }
+    }
+  });
+} catch (e) {
+  console.warn('Cloud deleted students listener error:', e);
+}
+
+// Listen to cloud deleted teachers
+try {
+  onSnapshot(doc(db, 'system_meta', 'deleted_teachers'), (snap) => {
+    if (snap.exists()) {
+      const data = snap.data();
+      if (Array.isArray(data?.ids)) {
+        cloudDeletedTeacherIds = new Set(data.ids);
+      }
+    }
+  });
+} catch (e) {
+  console.warn('Cloud deleted teachers listener error:', e);
+}
+
 // Seed initial data
 export async function seedInitialFirestoreData(): Promise<void> {
   try {
@@ -281,6 +314,16 @@ export async function seedInitialFirestoreData(): Promise<void> {
         batch.set(doc(db, 'teachers', t.id), t, { merge: true });
       }
       await batch.commit();
+    } else {
+      // Auto-push any local custom teachers created on this device to Cloud
+      const customTeachers = getCustomTeachers();
+      if (customTeachers.length > 0) {
+        const batch = writeBatch(db);
+        for (const t of customTeachers) {
+          batch.set(doc(db, 'teachers', t.id), t, { merge: true });
+        }
+        await batch.commit();
+      }
     }
 
     // 2. Ensure students are seeded if empty
@@ -288,6 +331,20 @@ export async function seedInitialFirestoreData(): Promise<void> {
     if (snapStudents.empty || snapStudents.docs.length === 0) {
       console.log('Seeding student roster to Firestore...');
       await restoreAllStudentsData();
+    } else {
+      // Auto-push any local custom students created on this device to Cloud
+      const customStudents = getCustomStudents();
+      if (customStudents.length > 0) {
+        const chunkSize = 300;
+        for (let i = 0; i < customStudents.length; i += chunkSize) {
+          const chunk = customStudents.slice(i, i + chunkSize);
+          const batch = writeBatch(db);
+          for (const s of chunk) {
+            batch.set(doc(db, 'students', s.id), s, { merge: true });
+          }
+          await batch.commit();
+        }
+      }
     }
 
     // 3. Ensure stories are seeded if empty
@@ -392,6 +449,8 @@ export function markStudentDeletedLocally(id: string) {
       localStorage.setItem('cerdas_deleted_student_ids', JSON.stringify([...current, id]));
     }
     removeCustomStudentLocally(id);
+    cloudDeletedStudentIds.add(id);
+    setDoc(doc(db, 'system_meta', 'deleted_students'), { ids: arrayUnion(id) }, { merge: true }).catch(console.warn);
   } catch (e) {
     console.warn(e);
   }
@@ -439,7 +498,8 @@ export function subscribeStudents(callback: (students: Student[]) => void) {
   return onSnapshot(
     collection(db, 'students'),
     (snapshot) => {
-      const deletedIds = new Set(getDeletedStudentIds());
+      const localDeleted = new Set(getDeletedStudentIds());
+      const deletedIds = new Set([...localDeleted, ...cloudDeletedStudentIds]);
       const customStudents = getCustomStudents().filter(s => !deletedIds.has(s.id));
       const firestoreStudents = snapshot.docs
         .map(d => ({ ...d.data(), id: d.id } as Student))
@@ -462,7 +522,8 @@ export function subscribeStudents(callback: (students: Student[]) => void) {
       callback(Array.from(mergedMap.values()));
     },
     (error) => {
-      const deletedIds = new Set(getDeletedStudentIds());
+      const localDeleted = new Set(getDeletedStudentIds());
+      const deletedIds = new Set([...localDeleted, ...cloudDeletedStudentIds]);
       const customStudents = getCustomStudents().filter(s => !deletedIds.has(s.id));
       const defaults = DEFAULT_STUDENTS.filter(s => !deletedIds.has(s.id));
       const mergedMap = new Map<string, Student>();
@@ -491,6 +552,8 @@ export function markTeacherDeletedLocally(id: string) {
       localStorage.setItem('cerdas_deleted_teacher_ids', JSON.stringify([...current, id]));
     }
     removeCustomTeacherLocally(id);
+    cloudDeletedTeacherIds.add(id);
+    setDoc(doc(db, 'system_meta', 'deleted_teachers'), { ids: arrayUnion(id) }, { merge: true }).catch(console.warn);
   } catch (e) {
     console.warn(e);
   }
@@ -538,7 +601,8 @@ export function subscribeTeachers(callback: (teachers: Teacher[]) => void) {
   return onSnapshot(
     collection(db, 'teachers'),
     (snapshot) => {
-      const deletedIds = new Set(getDeletedTeacherIds());
+      const localDeleted = new Set(getDeletedTeacherIds());
+      const deletedIds = new Set([...localDeleted, ...cloudDeletedTeacherIds]);
       const customTeachers = getCustomTeachers().filter(t => !deletedIds.has(t.id));
       const firestoreTeachers = snapshot.docs
         .map(d => ({ ...d.data(), id: d.id } as Teacher))
@@ -561,7 +625,8 @@ export function subscribeTeachers(callback: (teachers: Teacher[]) => void) {
       callback(Array.from(mergedMap.values()));
     },
     (error) => {
-      const deletedIds = new Set(getDeletedTeacherIds());
+      const localDeleted = new Set(getDeletedTeacherIds());
+      const deletedIds = new Set([...localDeleted, ...cloudDeletedTeacherIds]);
       const customTeachers = getCustomTeachers().filter(t => !deletedIds.has(t.id));
       const defaults = DEFAULT_TEACHERS.filter(t => !deletedIds.has(t.id));
       const mergedMap = new Map<string, Teacher>();
@@ -738,9 +803,16 @@ export async function deleteAllStudentsFromFirestore(): Promise<number> {
       allIds.add(d.id);
     }
 
-    // Mark all as deleted locally so onSnapshot/defaults don't resurrect them
-    localStorage.setItem('cerdas_deleted_student_ids', JSON.stringify(Array.from(allIds)));
+    // Mark all as deleted locally & in cloud metadata so all devices sync instantly
+    const allDeletedArray = Array.from(allIds);
+    localStorage.setItem('cerdas_deleted_student_ids', JSON.stringify(allDeletedArray));
     localStorage.removeItem('cerdas_custom_students');
+    cloudDeletedStudentIds = new Set(allDeletedArray);
+    try {
+      await setDoc(doc(db, 'system_meta', 'deleted_students'), { ids: allDeletedArray }, { merge: true });
+    } catch (e) {
+      console.warn('Failed to sync cloud deleted_students meta:', e);
+    }
 
     // 2. Batch delete all from Firestore in chunks
     const docsToDelete = snap.docs;
